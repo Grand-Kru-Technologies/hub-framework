@@ -18,7 +18,7 @@
 set -euo pipefail
 
 usage() { echo "usage: $0 <service-id> [<not-before-iso8601>]" >&2; exit 64; }
-[ $# -ge 1 ] && [ $# -le 2 ] || usage
+if [ $# -lt 1 ] || [ $# -gt 2 ]; then usage; fi
 SERVICE_ID=$1
 NOT_BEFORE=${2:-}
 : "${RAILWAY_TOKEN:?RAILWAY_TOKEN is required}"

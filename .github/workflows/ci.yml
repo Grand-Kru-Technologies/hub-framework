@@ -42,10 +42,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: shellcheck scripts/*.sh
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - run: pip install shellcheck-py==0.11.0.1
+      - run: shellcheck scripts/*.sh
       - run: python -m unittest discover -s scripts/tests -v
 
   stack:
