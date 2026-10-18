@@ -1,18 +1,19 @@
-"""Minimal stand-in for the Railway GraphQL API used by railway-deploy-image.sh tests.
+"""Minimal stand-in for the Railway GraphQL API used by railway-wait-deployment.sh tests.
 
 Behaviour is driven by env vars:
-  FAKE_STATUSES  comma-separated deployment statuses returned on successive polls
-  FAKE_ERROR_ON  operation name (serviceInstanceUpdate / serviceInstanceDeployV2) that returns a GraphQL error
-  FAKE_TOKEN     token the Project-Access-Token header must equal
-  FAKE_LOG       file each request body is appended to (one JSON per line)
+  FAKE_DEPLOYMENTS  JSON list of deployment nodes ({id,status,createdAt}) or null,
+                    returned on successive polls (last one repeats)
+  FAKE_ERROR        if set, every request returns this GraphQL error message
+  FAKE_TOKEN        value the Project-Access-Token header must equal
+  FAKE_LOG          file each request body is appended to (one JSON per line)
 """
 import json
 import os
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-statuses = os.environ.get("FAKE_STATUSES", "SUCCESS").split(",")
-error_on = os.environ.get("FAKE_ERROR_ON", "")
+deployments = json.loads(os.environ.get("FAKE_DEPLOYMENTS", "[]"))
+error = os.environ.get("FAKE_ERROR", "")
 token = os.environ.get("FAKE_TOKEN", "t")
 log_path = os.environ["FAKE_LOG"]
 polls = {"n": 0}
@@ -36,19 +37,14 @@ class Handler(BaseHTTPRequestHandler):
             f.write(json.dumps(body) + "\n")
         if self.headers.get("Project-Access-Token") != token:
             return self._send(401, {"errors": [{"message": "Not Authorized"}]})
-        q = body["query"]
-        for op in ("serviceInstanceUpdate", "serviceInstanceDeployV2"):
-            if op in q and op == error_on:
-                return self._send(200, {"errors": [{"message": f"{op} failed"}]})
-        if "serviceInstanceUpdate" in q:
-            return self._send(200, {"data": {"serviceInstanceUpdate": True}})
-        if "serviceInstanceDeployV2" in q:
-            return self._send(200, {"data": {"serviceInstanceDeployV2": "dep-123"}})
-        if "deployment(" in q:
-            i = min(polls["n"], len(statuses) - 1)
-            polls["n"] += 1
-            return self._send(200, {"data": {"deployment": {"status": statuses[i]}}})
-        return self._send(400, {"errors": [{"message": "unknown query"}]})
+        if error:
+            return self._send(200, {"errors": [{"message": error}]})
+        if "deployments(" not in body["query"]:
+            return self._send(400, {"errors": [{"message": "unknown query"}]})
+        node = deployments[min(polls["n"], len(deployments) - 1)] if deployments else None
+        polls["n"] += 1
+        edges = [{"node": node}] if node else []
+        return self._send(200, {"data": {"deployments": {"edges": edges}}})
 
 
 if __name__ == "__main__":
