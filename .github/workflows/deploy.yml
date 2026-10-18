@@ -1,0 +1,111 @@
+name: Deploy staging
+
+# Builds both service images, publishes them to GHCR, then points the Railway
+# staging services at the new immutable sha tags and waits for /health.
+#
+# Railway project: qg-hub-staging, environment: staging
+#   hub-app        <- ghcr.io/grand-kru-technologies/hub-framework/hub-app:sha-<sha>
+#   python-handler <- ghcr.io/grand-kru-technologies/hub-framework/python-handler:sha-<sha>
+
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - integrations/python/**
+      - example/recipe-app/**
+      - .github/workflows/deploy.yml
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+env:
+  IMAGE_PREFIX: ghcr.io/grand-kru-technologies/hub-framework
+  RAILWAY_ENVIRONMENT_ID: 6fbd88c0-89a3-41ff-a0a5-d38b8beda3b2
+  RAILWAY_HUB_APP_SERVICE_ID: c1129f35-8c17-4516-a5fb-c5ddd2b1b982
+  RAILWAY_PYTHON_HANDLER_SERVICE_ID: 8a9589e4-cfdc-4b4a-9345-209b388759a5
+  HUB_URL: https://staging.hub.grandkru.com
+
+jobs:
+  images:
+    name: publish images
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    strategy:
+      matrix:
+        include:
+          - name: hub-app
+            dockerfile: Dockerfile
+          - name: python-handler
+            dockerfile: integrations/python/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - id: tag
+        run: |
+          echo "tag=sha-$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            echo "channel=pr-${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "channel=staging" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/${{ matrix.name }}:${{ steps.tag.outputs.tag }}
+            ${{ env.IMAGE_PREFIX }}/${{ matrix.name }}:${{ steps.tag.outputs.channel }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.event.workflow_run.head_sha || github.sha }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+      - name: Image is pullable anonymously (Railway pulls without registry credentials)
+        run: |
+          docker logout ghcr.io
+          docker pull "$IMAGE_PREFIX/${{ matrix.name }}:${{ steps.tag.outputs.tag }}"
+
+  railway:
+    name: deploy to Railway staging
+    needs: images
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      TAG: ${{ needs.images.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require RAILWAY_TOKEN (Railway project token for qg-hub-staging / staging)
+        run: |
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "::error::RAILWAY_TOKEN secret is not set on this repo"
+            exit 1
+          fi
+      - name: Deploy python-handler
+        run: scripts/railway-deploy-image.sh "$RAILWAY_PYTHON_HANDLER_SERVICE_ID" "$IMAGE_PREFIX/python-handler:$TAG"
+      - name: Deploy hub-app
+        run: scripts/railway-deploy-image.sh "$RAILWAY_HUB_APP_SERVICE_ID" "$IMAGE_PREFIX/hub-app:$TAG"
+      - name: Smoke test staging
+        run: curl -fsS --retry 30 --retry-delay 10 --retry-all-errors "$HUB_URL/health"
