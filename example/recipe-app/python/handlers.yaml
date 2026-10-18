@@ -1,0 +1,3 @@
+- unique_name: exampleTaskPython
+  handler_name: example_task_python
+  handler_path: /app/example/recipe-app/python

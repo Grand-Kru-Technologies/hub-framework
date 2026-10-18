@@ -1,3 +1,4 @@
+import os
 from handler_loader import DynamicHandlerImporter
 from request_handler import create_app
 
@@ -14,4 +15,4 @@ def start(yaml_file_path):
 if __name__ == '__main__':
     yaml_file_path = os.getenv('YAML_FILE_PATH')
     app = start(yaml_file_path)
-    app.run(debug=True)
+    app.run(host=os.getenv('HOST', '0.0.0.0'), port=int(os.getenv('PORT', '5000')), debug=os.getenv('FLASK_DEBUG') == '1')

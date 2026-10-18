@@ -27,13 +27,17 @@ func main() {
 
 	api.RegisterTaskType("exampleTaskGolang", exampleTaskConstructor)
 
-	log.Printf("Starting {{.ApplicationName}} server on :8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
-
-	err := app.Start()
-	defer app.Stop()
-	if err != nil {
+	if err := app.Start(); err != nil {
 		log.Printf("Error starting application: %v", err)
 		return
 	}
+	defer app.Stop()
+
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "ok")
+	})
+
+	log.Printf("Starting exampleApp server on :8080")
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }

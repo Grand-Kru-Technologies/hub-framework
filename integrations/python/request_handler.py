@@ -19,6 +19,10 @@ def create_app(handlers):
     # Create a resolver for the schema
     resolver = RefResolver.from_schema(schema)
 
+    @app.route('/health', methods=['GET'])
+    def health():
+        return jsonify({"status": "ok", "handlers": sorted(handlers.keys())}), 200
+
     @app.route('/apply/<handler_name>', methods=['GET', 'POST', 'PUT'])
     def apply_handler(handler_name):
         # Get the JSON data from the request

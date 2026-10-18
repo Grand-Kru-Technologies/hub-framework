@@ -4,6 +4,9 @@ def find_project_root(current_path=None):
     """
     Find the project root by looking for a .git directory or a specific file that indicates the root.
     """
+    env_root = os.getenv('PROJECT_ROOT')
+    if env_root:
+        return env_root
     if current_path is None:
         current_path = os.getcwd()
     
