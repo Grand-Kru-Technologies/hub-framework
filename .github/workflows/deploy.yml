@@ -1,0 +1,74 @@
+name: Deploy staging
+
+# After CI passes on main, upload the repo to Railway with `railway up` for each
+# service (Railway builds the service's Dockerfile), then wait until Railway
+# reports the deployment SUCCESS, which happens only after /health passes.
+#
+# Railway project qg-hub-staging, environment staging:
+#   hub-app        Dockerfile                       /health  -> staging.hub.grandkru.com
+#   python-handler integrations/python/Dockerfile   /health  (private: python-handler.railway.internal:5000)
+
+on:
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+env:
+  RAILWAY_CLI_VERSION: 5.63.1
+  RAILWAY_ENVIRONMENT_ID: 6fbd88c0-89a3-41ff-a0a5-d38b8beda3b2
+  HUB_URL: https://staging.hub.grandkru.com
+
+jobs:
+  railway:
+    name: deploy ${{ matrix.service }} to Railway staging
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 1
+      matrix:
+        include:
+          # python-handler first: hub-app calls it.
+          - service: python-handler
+            service_id: 8a9589e4-cfdc-4b4a-9345-209b388759a5
+          - service: hub-app
+            service_id: c1129f35-8c17-4516-a5fb-c5ddd2b1b982
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+    steps:
+      - name: Require RAILWAY_TOKEN (project token for qg-hub-staging / staging)
+        run: |
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "::error::RAILWAY_TOKEN secret is not set on this repo"
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install -g "@railway/cli@${RAILWAY_CLI_VERSION}"
+      - id: up
+        name: railway up
+        run: |
+          echo "not_before=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          railway up --ci --service "${{ matrix.service_id }}" --environment "$RAILWAY_ENVIRONMENT_ID"
+      - name: Wait for healthy deployment
+        run: scripts/railway-wait-deployment.sh "${{ matrix.service_id }}" "${{ steps.up.outputs.not_before }}"
+
+  smoke:
+    name: smoke test staging.hub.grandkru.com
+    needs: railway
+    runs-on: ubuntu-latest
+    steps:
+      - run: curl -fsS --retry 30 --retry-delay 10 --retry-all-errors "$HUB_URL/health"
+      - run: curl -fsS "$HUB_URL/" | grep -q "Welcome to exampleApp"
