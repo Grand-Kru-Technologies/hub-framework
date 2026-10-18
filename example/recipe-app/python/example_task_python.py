@@ -60,3 +60,8 @@ if __name__ == "__main__":
 
     task.apply({}, sample_request)
     print(json.loads(sample_request['body']))
+
+def example_task_python(request: Dict[str, Any]) -> Dict[str, Any]:
+    """Module-level entry point loaded by integrations/python/handler_loader.py."""
+    ExampleTaskPython().apply({}, request)
+    return request
