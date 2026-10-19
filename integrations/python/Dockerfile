@@ -8,6 +8,7 @@ COPY example/recipe-app/python ./example/recipe-app/python
 COPY integrations/python ./integrations/python
 ENV PROJECT_ROOT=/app \
     YAML_FILE_PATH=/app/example/recipe-app/python/handlers.yaml \
+    HOST=0.0.0.0 \
     PORT=5000
 EXPOSE 5000
 HEALTHCHECK --interval=5s --timeout=3s --retries=10 CMD curl -fsS http://localhost:5000/health || exit 1

@@ -55,9 +55,9 @@ A pull request is mergeable only when all four jobs are green.
 
 ## 3. How deploys work
 
-`.github/workflows/deploy.yml` runs when `CI` finishes successfully on `main`. It can also be started by hand from the Actions tab or with `gh workflow run deploy.yml`.
+`.github/workflows/deploy.yml` runs when `CI` finishes successfully for a `push` to `main` from this repository. Pull-request runs and identically named branches in forks cannot enter the privileged deployment job. The workflow can also be started explicitly from the Actions tab or with `gh workflow run deploy.yml`.
 
-1. For each service, in order (python-handler first, because hub-app calls it):
+1. For each service, in order (python-handler first as the reserved dependency order; hub-app-to-Python integration is not implemented yet):
    - `railway up --ci --service <id> --environment <staging id>` uploads the checked-out commit, and Railway builds that service's Dockerfile.
    - `scripts/railway-wait-deployment.sh <id> <upload time>` waits for a deployment newer than the upload to reach `SUCCESS`. Railway reports `SUCCESS` only after the service's `/health` check passes (timeout 120 s), so a build that never becomes healthy fails the job. The old deployment keeps serving traffic in that case.
 2. `smoke`: `GET https://staging.hub.grandkru.com/health` returns 200, and `/` contains `Welcome to exampleApp`.

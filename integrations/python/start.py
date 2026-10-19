@@ -15,4 +15,4 @@ def start(yaml_file_path):
 if __name__ == '__main__':
     yaml_file_path = os.getenv('YAML_FILE_PATH')
     app = start(yaml_file_path)
-    app.run(host=os.getenv('HOST', '0.0.0.0'), port=int(os.getenv('PORT', '5000')), debug=os.getenv('FLASK_DEBUG') == '1')
+    app.run(host=os.environ['HOST'], port=int(os.getenv('PORT', '5000')), debug=os.getenv('FLASK_DEBUG') == '1')

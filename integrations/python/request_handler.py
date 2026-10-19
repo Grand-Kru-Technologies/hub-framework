@@ -84,5 +84,5 @@ if __name__ == '__main__':
         'test_handler': lambda x: {'message': f'Handled request with data: {x}'}
     }
     app = create_app(dummy_handlers)
-    app.run(debug=True)
+    app.run(debug=os.getenv('FLASK_DEBUG') == '1')
     

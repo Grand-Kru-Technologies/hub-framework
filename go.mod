@@ -2,7 +2,7 @@ module github.com/QueerGlobal/hub-framework
 
 go 1.22
 
-toolchain go1.22.5
+toolchain go1.27.2
 
 require (
 	github.com/QueerGlobal/qg-config-go v0.0.2
