@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 import os
 from utils import find_project_root
-from start import start
+from start import server_options, start
 
 class TestStart(unittest.TestCase):
     def setUp(self):
@@ -39,6 +39,23 @@ class TestStart(unittest.TestCase):
 
         # Assert that the function returns the app instance
         self.assertEqual(result, mock_app)
+
+    def test_server_options_default_to_loopback_without_debug(self):
+        self.assertEqual(
+            server_options({}),
+            {'host': '127.0.0.1', 'port': 5000, 'debug': False},
+        )
+
+    def test_server_options_use_explicit_container_settings(self):
+        self.assertEqual(
+            server_options(
+                {'HOST': '192.0.2.10', 'PORT': '5100', 'FLASK_DEBUG': '0'}
+            ),
+            {'host': '192.0.2.10', 'port': 5100, 'debug': False},
+        )
+
+    def test_server_options_allow_explicit_debug_opt_in(self):
+        self.assertTrue(server_options({'FLASK_DEBUG': '1'})['debug'])
 
 if __name__ == '__main__':
     unittest.main()
