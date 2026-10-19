@@ -123,5 +123,5 @@ Set `HUB=http://localhost:8080` and `PY=http://localhost:5000` locally. On stagi
 
 ## 5. Known issues
 
-- `POST /apply/exampleTaskPython` with a schema-valid request returns `500 Handler execution error: Invalid request or empty body`. The request schema names the field `Body` (base64), but `ExampleTaskPython.apply` reads lowercase `body` as raw bytes. To be fixed in the handler, not the schema.
+- `exampleTaskPython` expects the schema-defined uppercase `Body` as base64-encoded UTF-8 JSON and returns the updated recipe in the same representation. Missing or empty bodies, malformed base64, invalid UTF-8/JSON, non-object recipes, and non-list `ingredients` are rejected as handler execution errors.
 - hub-app does not call python-handler yet. `PYTHON_HANDLER_URL` is set for the services that will.
