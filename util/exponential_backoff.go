@@ -1,11 +1,12 @@
 package util
 
 import (
-	"fmt"
-	"github.com/pkg/errors"
+	"log/slog"
 	"math/rand"
 	"strings"
 	"time"
+
+	"github.com/pkg/errors"
 )
 
 var UnrecoverableErrorMsg = "error is unrecoverable - backoff cancelled"
@@ -19,37 +20,72 @@ type BackoffConfig struct {
 
 type Backoff struct {
 	config BackoffConfig
+	sleep  func(time.Duration)
 }
 
 func NewBackoff(config BackoffConfig) *Backoff {
-	return &Backoff{config: config}
+	return &Backoff{
+		config: config,
+		sleep:  time.Sleep,
+	}
+}
+
+func (b *Backoff) maxAttempts() int {
+	if b.config.MaxRetries <= 0 {
+		return 1
+	}
+	return b.config.MaxRetries
+}
+
+func (b *Backoff) nextBaseDelay(current time.Duration) time.Duration {
+	next := time.Duration(float64(current) * b.config.Multiplier)
+	if next > b.config.MaxDelay {
+		return b.config.MaxDelay
+	}
+	return next
+}
+
+func (b *Backoff) sleepDuration(base time.Duration) time.Duration {
+	delay := base
+	if half := delay / 2; half > 0 {
+		delay += time.Duration(rand.Int63n(int64(half)))
+	}
+	if delay > b.config.MaxDelay {
+		delay = b.config.MaxDelay
+	}
+	return delay
 }
 
 func (b *Backoff) ExecuteWithBackoff(operation func() error) error {
-	delay := b.config.InitialDelay
+	attempts := b.maxAttempts()
+	baseDelay := b.config.InitialDelay
 
 	var err error
-	for i := 0; i < b.config.MaxRetries; i++ {
+	for i := 0; i < attempts; i++ {
 		err = operation()
 		if err == nil {
 			return nil
 		}
 
 		if strings.Contains(err.Error(), UnrecoverableErrorMsg) {
-			fmt.Println("Unrecoverable error encountered, canceling backoff:", err) // TODO - replace this with proper logging
-			return err
+			slog.Warn("unrecoverable error encountered, canceling backoff", "error", err)
+			return errors.Wrap(err, "backoff canceled due to unrecoverable error")
 		}
 
-		fmt.Printf("Attempt %d failed: %v. Retrying in %v...\n", i+1, err, delay) // TODO - replace this with proper logging
-		time.Sleep(delay)
-
-		// Calculate next delay with jitter
-		delay = time.Duration(float64(delay) * b.config.Multiplier)
-		if delay > b.config.MaxDelay {
-			delay = b.config.MaxDelay
+		if i == attempts-1 {
+			break
 		}
-		jitter := time.Duration(rand.Int63n(int64(delay / 2)))
-		delay += jitter
+
+		delay := b.sleepDuration(baseDelay)
+		slog.Info(
+			"backoff retry scheduled",
+			"attempt", i+1,
+			"max_attempts", attempts,
+			"error", err,
+			"delay", delay,
+		)
+		b.sleep(delay)
+		baseDelay = b.nextBaseDelay(baseDelay)
 	}
 
 	return errors.Wrap(err, "all retry attempts failed")
