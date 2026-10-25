@@ -158,6 +158,12 @@ class StubHarness:
                 if [ "$name" = "github_tofu_apply_role_arn" ]; then echo "arn:apply"; exit 0; fi
                 exit 1
                 ;;
+              state)
+                if [ "${{2:-}}" = "list" ] && [ -f "$BOOTSTRAP_MARKER" ]; then
+                  echo 'aws_iam_openid_connect_provider.github[0]'
+                fi
+                exit 0
+                ;;
             esac
             exit 0
             """,
@@ -251,6 +257,21 @@ class SetupStagingOpentofuStubTest(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("create_github_oidc_provider=false (existing GitHub OIDC provider found in AWS)", proc.stderr)
+
+    def test_bootstrap_replan_keeps_create_after_managed_oidc(self):
+        self.h.doppler_file.write_text(json.dumps({"LOCAL_STATE_ENCRYPTION_PASSPHRASE": SECRET_LOCAL}))
+        (self.h.bootstrap_dir / "tfplan").touch()
+        self.h.run(
+            "--repo-root", str(self.h.repo_root), "--yes", "bootstrap", "apply", STUB_OIDC_EXISTS="0"
+        )
+        proc = self.h.run(
+            "--repo-root", str(self.h.repo_root), "bootstrap", "plan", STUB_OIDC_EXISTS="1"
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn(
+            "create_github_oidc_provider=true (bootstrap state already manages GitHub OIDC provider)",
+            proc.stderr,
+        )
 
     def test_bootstrap_plan_detects_missing_oidc(self):
         self.h.doppler_file.write_text(json.dumps({"LOCAL_STATE_ENCRYPTION_PASSPHRASE": SECRET_LOCAL}))

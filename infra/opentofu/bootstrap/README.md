@@ -11,7 +11,7 @@ doppler run --project hub-framework --config staging -- \
   ./scripts/setup-staging-opentofu.sh bootstrap apply
 ```
 
-Before `bootstrap plan`, `all plan`, or `all setup`, the setup script runs a read-only `aws iam list-open-id-connect-providers` check. If a `token.actions.githubusercontent.com` provider already exists, it sets `create_github_oidc_provider=false` for that plan; otherwise it sets `true` and logs the choice. Override with `--create-github-oidc-provider true` or `--create-github-oidc-provider false` when you need to force create vs lookup mode.
+Before `bootstrap plan`, `all plan`, or `all setup`, the setup script runs a read-only `aws iam list-open-id-connect-providers` check. If bootstrap state already tracks `aws_iam_openid_connect_provider.github`, it keeps `create_github_oidc_provider=true`. Otherwise, if a `token.actions.githubusercontent.com` provider already exists in AWS, it sets `create_github_oidc_provider=false` for that plan; if not, it sets `true`. The script logs the choice. Override with `--create-github-oidc-provider true` or `--create-github-oidc-provider false` when you need to force create vs lookup mode.
 
 On a fresh AWS account with no GitHub OIDC provider, detection chooses create mode so the provider appears in the bootstrap plan you approve. If OpenTofu cannot manage OIDC, use the documented fallback (confirmed): `./scripts/setup-staging-opentofu.sh oidc ensure`.
 

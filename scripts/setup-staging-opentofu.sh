@@ -160,11 +160,20 @@ github_oidc_provider_exists_in_aws() {
     | jq -e '.OpenIDConnectProviderList[] | select(.Arn | contains("token.actions.githubusercontent.com"))' >/dev/null
 }
 
+bootstrap_state_manages_github_oidc() {
+  export_local_state_passphrase
+  (cd "$(bootstrap_dir)" && tofu state list -no-color 2>/dev/null \
+    | grep -qE '^aws_iam_openid_connect_provider\.github(\[0\])?$')
+}
+
 resolve_create_github_oidc_provider_for_plan() {
   export_local_state_passphrase
   if [ -n "$CREATE_GITHUB_OIDC_PROVIDER_OVERRIDE" ]; then
     TF_VAR_create_github_oidc_provider="$CREATE_GITHUB_OIDC_PROVIDER_OVERRIDE"
     log "create_github_oidc_provider=${TF_VAR_create_github_oidc_provider} (command-line override)"
+  elif bootstrap_state_manages_github_oidc; then
+    TF_VAR_create_github_oidc_provider=true
+    log "create_github_oidc_provider=true (bootstrap state already manages GitHub OIDC provider)"
   elif github_oidc_provider_exists_in_aws; then
     TF_VAR_create_github_oidc_provider=false
     log "create_github_oidc_provider=false (existing GitHub OIDC provider found in AWS)"
