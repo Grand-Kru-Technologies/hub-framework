@@ -2,7 +2,6 @@ package remotehttpservice
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -87,7 +86,7 @@ func (fs *ForwardingService) Reporter() remoteforward.ErrorReporter {
 }
 
 func (fs *ForwardingService) forwardRequest(request entity.ServiceRequest) (*http.Response, error) {
-	jsonData, err := json.Marshal(request)
+	jsonData, err := remoteforward.JSONPayloadForForward(request)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}

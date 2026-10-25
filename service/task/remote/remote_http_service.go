@@ -3,7 +3,6 @@ package remote
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -110,7 +109,7 @@ func (fs *ForwardingService) Name() string {
 }
 
 func (fs *ForwardingService) forwardRequest(ctx context.Context, request entity.ServiceRequest) (*http.Response, error) {
-	jsonData, err := json.Marshal(request)
+	jsonData, err := remoteforward.JSONPayloadForForward(request)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
