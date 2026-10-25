@@ -6,7 +6,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - PYTHON_HANDLER_URL=http://python-handler:5000
+      - ENABLE_SMOKE_FORWARD=true
     depends_on:
       python-handler:
         condition: service_healthy
