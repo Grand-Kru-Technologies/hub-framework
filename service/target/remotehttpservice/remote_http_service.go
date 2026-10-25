@@ -43,28 +43,15 @@ func NewForwardingService(config interface{}) ForwardingService {
 	backoff := util.NewBackoff(cfg.BackoffConfig)
 	svc.backoff = backoff
 
-	timeout := cfg.ClientTimeout
-	if timeout <= 0 {
-		timeout = 30 * time.Second
-	}
-	svc.client = &http.Client{Timeout: timeout}
-
-	if cfg.Logger != nil {
-		svc.log = *cfg.Logger
-	} else {
-		opts := remoteforward.ServiceOptionsFromMap(nil, "remote_target_forwarder")
-		svc.log = opts.Logger
-	}
-
+	opts := remoteforward.BaseServiceOptions(cfg.ClientTimeout, cfg.Logger, "remote_target_forwarder")
+	dsn := remoteforward.ResolveSentryDSNWithOverride(cfg.SentryDSN)
 	if cfg.Reporter != nil {
 		svc.reporter = cfg.Reporter
 	} else {
-		dsn := cfg.SentryDSN
-		if dsn == "" {
-			dsn = remoteforward.ResolveSentryDSN(nil)
-		}
 		svc.reporter = remoteforward.NewErrorReporter(dsn)
 	}
+	svc.client = &http.Client{Timeout: opts.ClientTimeout}
+	svc.log = opts.Logger
 
 	return svc
 }
@@ -93,6 +80,10 @@ func (fs *ForwardingService) Apply(request entity.ServiceRequest) (entity.Servic
 	}
 
 	return serviceResponse, nil
+}
+
+func (fs *ForwardingService) Reporter() remoteforward.ErrorReporter {
+	return fs.reporter
 }
 
 func (fs *ForwardingService) forwardRequest(request entity.ServiceRequest) (*http.Response, error) {

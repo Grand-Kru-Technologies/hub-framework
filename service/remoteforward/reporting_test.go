@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/QueerGlobal/hub-framework/util"
 	"github.com/stretchr/testify/assert"
@@ -19,6 +20,10 @@ type recordingReporter struct {
 func (r *recordingReporter) ReportError(err error, stage string) {
 	r.calls = append(r.calls, stage+":"+err.Error())
 }
+
+func (r *recordingReporter) Flush(time.Duration) bool { return true }
+
+func (r *recordingReporter) Close() error { return nil }
 
 func TestReportIfExhausted_ReportsRetryableFailure(t *testing.T) {
 	reporter := &recordingReporter{}

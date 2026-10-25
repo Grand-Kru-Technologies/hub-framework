@@ -67,6 +67,8 @@ jobs:
           cache: true
       - name: remote forward integration (stub upstream)
         run: go test -count=1 ./service/remoteforward/... -run TestForwardIntegration
+      - name: hub forwards to exampleTaskPython
+        run: bash scripts/smoke-hub-python-forward.sh
       - if: always()
         run: docker compose logs
       - if: always()

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/QueerGlobal/hub-framework/core/entity"
@@ -29,8 +30,11 @@ type ForwardingService struct {
 func NewForwardingService(config map[string]interface{}) (entity.Task, error) {
 	svc := ForwardingService{}
 
-	if host, ok := config["host"].(string); ok {
+	if host, ok := config["host"].(string); ok && host != "" {
 		svc.Host = host
+	}
+	if svc.Host == "" {
+		svc.Host = os.Getenv("PYTHON_HANDLER_URL")
 	}
 
 	if pathPrefix, ok := config["pathprefix"].(string); ok {

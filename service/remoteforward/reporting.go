@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/QueerGlobal/hub-framework/service/logging"
 	"github.com/QueerGlobal/hub-framework/util"
@@ -15,11 +16,19 @@ import (
 // to Sentry). Implementations must not log secrets or personal data from err.
 type ErrorReporter interface {
 	ReportError(err error, stage string)
+	// Flush drains buffered events (for example before process exit). No-op for discard reporters.
+	Flush(timeout time.Duration) bool
+	// Close flushes pending events; safe to call multiple times.
+	Close() error
 }
 
 type noopErrorReporter struct{}
 
 func (noopErrorReporter) ReportError(err error, stage string) {}
+
+func (noopErrorReporter) Flush(time.Duration) bool { return true }
+
+func (noopErrorReporter) Close() error { return nil }
 
 // NoopErrorReporter returns an ErrorReporter that discards all reports.
 func NoopErrorReporter() ErrorReporter {
@@ -75,6 +84,23 @@ func (s *sentryReporter) ReportError(err error, stage string) {
 		scope.SetTag("component", "remote_forwarder")
 		sentry.CaptureException(safe)
 	})
+}
+
+func (s *sentryReporter) Flush(timeout time.Duration) bool {
+	return sentry.Flush(timeout)
+}
+
+func (s *sentryReporter) Close() error {
+	sentry.Flush(2 * time.Second)
+	return nil
+}
+
+// FlushInitializedSentry drains the global Sentry client when it was initialized for remote forwarders.
+func FlushInitializedSentry(timeout time.Duration) bool {
+	if !sentryInitOK {
+		return true
+	}
+	return sentry.Flush(timeout)
 }
 
 // redactErrorForReport returns an error safe to send to external trackers (no upstream bodies).

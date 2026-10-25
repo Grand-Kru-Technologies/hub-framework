@@ -4,18 +4,42 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/QueerGlobal/hub-framework/api"
 	"github.com/QueerGlobal/hub-framework/example/recipe-app/golang/tasks"
 )
 
-func main() {
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "Welcome to exampleApp!")
-	})
+type rootHandler struct {
+	hub http.Handler
+}
 
-	// Example of using the API client
-	app := api.NewApplication("exampleApp", api.WithLogLevel(api.InfoLevel))
+func (h rootHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	switch r.URL.Path {
+	case "/":
+		fmt.Fprintf(w, "Welcome to exampleApp!")
+		return
+	case "/health":
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "ok")
+		return
+	}
+	if h.hub != nil {
+		h.hub.ServeHTTP(w, r)
+		return
+	}
+	http.NotFound(w, r)
+}
+
+func main() {
+	app := api.NewApplication(
+		"exampleApp",
+		api.WithLogLevel(api.InfoLevel),
+		api.WithPublicPort(8080),
+		api.WithHTTPListen(false),
+	)
 	if app == nil {
 		log.Printf("Error creating application")
 		return
@@ -24,7 +48,6 @@ func main() {
 	exampleTaskConstructor := api.TaskConstructorFunc(func(config map[string]any) (api.Task, error) {
 		return tasks.NewExampleTaskGolang(config), nil
 	})
-
 	api.RegisterTaskType("exampleTaskGolang", exampleTaskConstructor)
 
 	if err := app.Start(); err != nil {
@@ -33,11 +56,22 @@ func main() {
 	}
 	defer app.Stop()
 
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, "ok")
-	})
+	root := rootHandler{}
+	if app.PublicHandler != nil {
+		root.hub = app.PublicHandler
+	}
 
-	log.Printf("Starting exampleApp server on :8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	server := &http.Server{Addr: ":8080", Handler: root}
+
+	go func() {
+		log.Printf("Starting exampleApp server on :8080")
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("server failed: %v", err)
+		}
+	}()
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	<-stop
+	_ = server.Close()
 }

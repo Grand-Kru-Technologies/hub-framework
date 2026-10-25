@@ -70,5 +70,36 @@ jobs:
     needs: railway
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - run: curl -fsS --retry 30 --retry-delay 10 --retry-all-errors "$HUB_URL/health"
       - run: curl -fsS "$HUB_URL/" | grep -q "Welcome to exampleApp"
+      - name: hub forwards to exampleTaskPython
+        env:
+          HUB_URL: ${{ env.HUB_URL }}
+        run: bash scripts/smoke-hub-python-forward.sh
+
+  tag-release:
+    name: tag successful staging deploy
+    needs: smoke
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+      - name: Ensure baseline tag exists once
+        run: |
+          if ! git rev-parse hub-framework-staging-baseline >/dev/null 2>&1; then
+            git tag -a hub-framework-staging-baseline -m "Baseline before automated deploy tags" "$(git rev-list --max-parents=0 HEAD)"
+            git push origin hub-framework-staging-baseline
+          fi
+      - name: Tag this deploy
+        run: |
+          SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
+          SHORT="$(git rev-parse --short "$SHA")"
+          TAG="hub-framework-staging-${SHORT}-$(date -u +%Y%m%dT%H%M%SZ)"
+          git tag -a "$TAG" -m "Staging deploy $TAG" "$SHA"
+          git push origin "$TAG"

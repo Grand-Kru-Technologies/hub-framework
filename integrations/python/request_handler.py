@@ -28,9 +28,15 @@ def create_app(handlers):
         # Get the JSON data from the request
         data = request.json
 
-        # Validate the input structure
-        if not isinstance(data, dict) or 'Handler' not in data or 'Request' not in data:
+        # Accept either the wrapped {Handler, Request} shape or a bare ServiceRequest
+        # (for example from hub HttpService remote forwarders).
+        if not isinstance(data, dict):
             return jsonify({"error": "Invalid input structure"}), 400
+        if 'Handler' not in data or 'Request' not in data:
+            if 'ApiName' in data and 'ServiceName' in data:
+                data = {"Handler": handler_name, "Request": data}
+            else:
+                return jsonify({"error": "Invalid input structure"}), 400
 
         # Validate the handler name
         if data['Handler'] != handler_name:
@@ -57,6 +63,7 @@ def create_app(handlers):
         # Call the handler
         try:
             result = handlers[handler_name](data['Request'])
+            _normalize_handler_result(result)
             return jsonify(result), 200
         except Exception as e:
             app.logger.error(f"Handler execution error: {str(e)}")
