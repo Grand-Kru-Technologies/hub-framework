@@ -90,6 +90,10 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
+      - name: Configure git identity for annotated tags
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
       - name: Ensure baseline tag exists once
         run: |
           if ! git rev-parse hub-framework-staging-baseline >/dev/null 2>&1; then

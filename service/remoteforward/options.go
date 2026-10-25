@@ -40,8 +40,21 @@ func BaseServiceOptions(clientTimeout time.Duration, logger *zerolog.Logger, com
 // ServiceOptionsFromMap builds options from a task-style config map and env.
 func ServiceOptionsFromMap(config map[string]interface{}, component string) ServiceOptions {
 	opts := BaseServiceOptions(0, nil, component)
-	if rawTimeout, ok := config["clientTimeout"].(float64); ok && rawTimeout > 0 {
-		opts.ClientTimeout = time.Duration(rawTimeout * float64(time.Second))
+	if raw, ok := config["clientTimeout"]; ok {
+		switch v := raw.(type) {
+		case float64:
+			if v > 0 {
+				opts.ClientTimeout = time.Duration(v * float64(time.Second))
+			}
+		case int:
+			if v > 0 {
+				opts.ClientTimeout = time.Duration(v) * time.Second
+			}
+		case int64:
+			if v > 0 {
+				opts.ClientTimeout = time.Duration(v) * time.Second
+			}
+		}
 	}
 	opts.Reporter = NewErrorReporter(ResolveSentryDSN(config))
 	return opts
