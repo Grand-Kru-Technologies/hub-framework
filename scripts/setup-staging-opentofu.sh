@@ -10,7 +10,7 @@
 #   oidc ensure
 #   bootstrap plan | apply
 #   github-setup plan | apply
-#   all plan | apply
+#   all plan | apply          (plan: bootstrap only; apply: bootstrap then github-setup)
 #
 # Options:
 #   --doppler-project NAME   default: hub-framework
@@ -52,8 +52,8 @@ Commands:
   bootstrap apply             Apply saved bootstrap plan (bootstrap/tfplan)
   github-setup plan           Plan github-setup (requires bootstrap applied)
   github-setup apply          Apply saved github-setup plan
-  all plan                    bootstrap plan then github-setup plan
-  all apply                   bootstrap apply then github-setup apply
+  all plan                    Plan bootstrap stack only (github-setup plan runs in all apply)
+  all apply                   bootstrap apply, github-setup plan, then github-setup apply
 
 Options:
   --doppler-project NAME      Doppler project (default: ${DEFAULT_DOPPLER_PROJECT})
@@ -211,11 +211,11 @@ bootstrap_apply_role_arn() {
 github_setup_plan() {
   local local_pass staging_pass github_token plan_arn apply_arn dir
   local_pass="$(load_local_state_passphrase)"
+  export TF_VAR_local_state_encryption_passphrase="$local_pass"
   staging_pass="$(load_staging_state_passphrase)"
   github_token="$(load_github_admin_token)"
   plan_arn="$(bootstrap_plan_role_arn)"
   apply_arn="$(bootstrap_apply_role_arn)"
-  export TF_VAR_local_state_encryption_passphrase="$local_pass"
   export TF_VAR_state_encryption_passphrase="$staging_pass"
   export TF_VAR_github_token="$github_token"
   export TF_VAR_tofu_plan_role_arn="$plan_arn"
@@ -229,11 +229,11 @@ github_setup_plan() {
 github_setup_apply() {
   local local_pass staging_pass github_token plan_arn apply_arn dir
   local_pass="$(load_local_state_passphrase)"
+  export TF_VAR_local_state_encryption_passphrase="$local_pass"
   staging_pass="$(load_staging_state_passphrase)"
   github_token="$(load_github_admin_token)"
   plan_arn="$(bootstrap_plan_role_arn)"
   apply_arn="$(bootstrap_apply_role_arn)"
-  export TF_VAR_local_state_encryption_passphrase="$local_pass"
   export TF_VAR_state_encryption_passphrase="$staging_pass"
   export TF_VAR_github_token="$github_token"
   export TF_VAR_tofu_plan_role_arn="$plan_arn"
@@ -334,10 +334,10 @@ main() {
       case "${COMMAND[1]:-}" in
         plan)
           bootstrap_plan
-          github_setup_plan
           ;;
         apply)
           bootstrap_apply
+          github_setup_plan
           github_setup_apply
           maybe_push_baseline_tag
           ;;
