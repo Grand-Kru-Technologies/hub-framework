@@ -57,6 +57,19 @@ func NewForwardingService(config map[string]interface{}) (entity.Task, error) {
 		}
 	}
 
+	if backoffConfig.MaxRetries <= 0 {
+		backoffConfig.MaxRetries = 3
+	}
+	if backoffConfig.InitialDelay <= 0 {
+		backoffConfig.InitialDelay = 500 * time.Millisecond
+	}
+	if backoffConfig.MaxDelay <= 0 {
+		backoffConfig.MaxDelay = 5 * time.Second
+	}
+	if backoffConfig.Multiplier <= 0 {
+		backoffConfig.Multiplier = 2
+	}
+
 	backoff := util.NewBackoff(backoffConfig)
 	svc.backoff = backoff
 
