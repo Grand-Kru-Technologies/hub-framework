@@ -64,8 +64,3 @@ variable "github_oidc_url" {
   description = "GitHub Actions OIDC issuer URL."
 }
 
-variable "github_oidc_thumbprint" {
-  type        = string
-  default     = "6938fd4d98bab03fa76916958d6cb6a0a5769a08"
-  description = "SHA-1 thumbprint for the GitHub OIDC TLS certificate (40 hex characters)."
-}

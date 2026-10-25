@@ -1,6 +1,7 @@
 """Tests for setup-staging-opentofu.sh with stubbed doppler, tofu, git, openssl."""
 import json
 import os
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -9,7 +10,10 @@ import unittest
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+REPO_ROOT = HERE.parent.parent
 SCRIPT = HERE.parent / "setup-staging-opentofu.sh"
+THUMBPRINTS_SRC = REPO_ROOT / "infra/opentofu/bootstrap/github-oidc-thumbprints"
+SUBPROCESS_TIMEOUT = 30
 SECRET_LOCAL = "existing-local-pass"
 SECRET_STAGING = "existing-staging-pass"
 GENERATED = "generated-passphrase-base64"
@@ -33,11 +37,15 @@ class StubHarness:
         self.doppler_file = Path(self.tmp) / "doppler-secrets.json"
         self.doppler_file.write_text("{}")
         self.tofu_log = Path(self.tmp) / "tofu.log"
+        self.tofu_passphrase_log = Path(self.tmp) / "tofu-passphrases.log"
         self.aws_log = Path(self.tmp) / "aws.log"
         self.git_log = Path(self.tmp) / "git.log"
         self.aws_log.touch()
         self.git_log.touch()
         self.tofu_log.touch()
+        self.tofu_passphrase_log.touch()
+        if THUMBPRINTS_SRC.is_file():
+            shutil.copy(THUMBPRINTS_SRC, self.bootstrap_dir / "github-oidc-thumbprints")
         self._write_stubs()
 
     def _write_stubs(self) -> None:
@@ -85,6 +93,14 @@ class StubHarness:
             f"""\
             #!/usr/bin/env bash
             echo "$*" >> "{self.aws_log}"
+            if echo "$*" | grep -q "list-open-id-connect-providers"; then
+              if [ "${{STUB_OIDC_EXISTS:-0}}" = "1" ]; then
+                echo '{{"OpenIDConnectProviderList":[{{"Arn":"arn:aws:iam::123:oidc-provider/token.actions.githubusercontent.com"}}]}}'
+              else
+                echo '{{"OpenIDConnectProviderList":[]}}'
+              fi
+              exit 0
+            fi
             if echo "$*" | grep -q "create-open-id-connect-provider"; then
               exit 0
             fi
@@ -97,6 +113,12 @@ class StubHarness:
             f"""\
             #!/usr/bin/env bash
             echo "$PWD $*" >> "{self.tofu_log}"
+            if [ -n "${{TF_VAR_local_state_encryption_passphrase:-}}" ]; then
+              echo "local_pass=${{TF_VAR_local_state_encryption_passphrase}}" >> "{self.tofu_passphrase_log}"
+            fi
+            if [ -n "${{TF_VAR_state_encryption_passphrase:-}}" ]; then
+              echo "staging_pass=${{TF_VAR_state_encryption_passphrase}}" >> "{self.tofu_passphrase_log}"
+            fi
             if [ -z "${{TF_VAR_local_state_encryption_passphrase:-}}" ]; then
               case "${{1:-}}" in init|plan|output|apply)
                 echo "missing TF_VAR_local_state_encryption_passphrase" >&2
@@ -181,6 +203,7 @@ class StubHarness:
             text=True,
             env=self.env(**env_extra),
             input=input_text,
+            timeout=SUBPROCESS_TIMEOUT,
             cwd=str(self.repo_root),
         )
         return proc
@@ -221,18 +244,35 @@ class SetupStagingOpentofuStubTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertNotIn("create-open-id-connect-provider", self.h.aws_log.read_text())
 
-    def test_bootstrap_plan_fails_when_oidc_lookup_missing(self):
+    def test_bootstrap_plan_detects_existing_oidc(self):
+        self.h.doppler_file.write_text(json.dumps({"LOCAL_STATE_ENCRYPTION_PASSPHRASE": SECRET_LOCAL}))
+        proc = self.h.run(
+            "--repo-root", str(self.h.repo_root), "bootstrap", "plan", STUB_OIDC_EXISTS="1"
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("create_github_oidc_provider=false (existing GitHub OIDC provider found in AWS)", proc.stderr)
+
+    def test_bootstrap_plan_detects_missing_oidc(self):
+        self.h.doppler_file.write_text(json.dumps({"LOCAL_STATE_ENCRYPTION_PASSPHRASE": SECRET_LOCAL}))
+        proc = self.h.run(
+            "--repo-root", str(self.h.repo_root), "bootstrap", "plan", STUB_OIDC_EXISTS="0"
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("create_github_oidc_provider=true (no GitHub OIDC provider in AWS)", proc.stderr)
+
+    def test_bootstrap_plan_override_create_false_fails_without_provider(self):
         self.h.doppler_file.write_text(json.dumps({"LOCAL_STATE_ENCRYPTION_PASSPHRASE": SECRET_LOCAL}))
         proc = self.h.run(
             "--repo-root",
             str(self.h.repo_root),
+            "--create-github-oidc-provider",
+            "false",
             "bootstrap",
             "plan",
             STUB_OIDC_EXISTS="0",
-            TF_VAR_create_github_oidc_provider="false",
         )
         self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("create_github_oidc_provider=false", proc.stderr)
+        self.assertIn("create_github_oidc_provider=false (command-line override)", proc.stderr)
 
     def test_bootstrap_plan_on_fresh_account_default_create(self):
         self.h.doppler_file.write_text(json.dumps({"LOCAL_STATE_ENCRYPTION_PASSPHRASE": SECRET_LOCAL}))
@@ -273,6 +313,9 @@ class SetupStagingOpentofuStubTest(unittest.TestCase):
         stored = self.h.secrets()["TOFU_STATE_ENCRYPTION_PASSPHRASE"]
         self.assertEqual(stored, GENERATED)
         self.h.assert_no_secrets_leaked(self, proc, GENERATED)
+        pass_log = self.h.tofu_passphrase_log.read_text()
+        self.assertIn(f"local_pass={SECRET_LOCAL}", pass_log)
+        self.assertIn(f"staging_pass={GENERATED}", pass_log)
         self.h.doppler_file.write_text(
             json.dumps(
                 {

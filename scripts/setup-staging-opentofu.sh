@@ -13,7 +13,7 @@ DEFAULT_DOPPLER_CONFIG="staging"
 DEFAULT_BASELINE_COMMIT="1583326b"
 DEFAULT_BASELINE_TAG="hub-framework-staging-baseline"
 GITHUB_OIDC_URL="https://token.actions.githubusercontent.com"
-GITHUB_OIDC_THUMBPRINT="6938fd4d98bab03fa76833955d3977e6238c545d"
+CREATE_GITHUB_OIDC_PROVIDER_OVERRIDE=""
 
 SECRET_LOCAL_STATE_PASS="LOCAL_STATE_ENCRYPTION_PASSPHRASE"
 SECRET_STAGING_STATE_PASS="TOFU_STATE_ENCRYPTION_PASSPHRASE"
@@ -47,6 +47,8 @@ Options:
   --repo-root PATH
   --baseline-tag-commit SHA
   --push-baseline-tag           Only valid with all apply or all setup
+  --create-github-oidc-provider true|false
+                                Override bootstrap OIDC mode (default: detect via AWS)
   --yes                         Skip apply confirmation (unsafe)
   --dry-run
   -h, --help
@@ -138,23 +140,53 @@ export_local_state_passphrase() {
   export TF_VAR_local_state_encryption_passphrase
 }
 
-export_bootstrap_tofu_vars() {
+github_oidc_thumbprints_file() {
+  printf '%s/infra/opentofu/bootstrap/github-oidc-thumbprints' "$REPO_ROOT"
+}
+
+read_github_oidc_thumbprints() {
+  local file thumbprints
+  file="$(github_oidc_thumbprints_file)"
+  if [ ! -f "$file" ]; then
+    log "Missing ${file}"
+    exit 1
+  fi
+  thumbprints="$(tr -d '[:space:]' <"$file")"
+  printf '%s' "$thumbprints" | tr ',' ' '
+}
+
+github_oidc_provider_exists_in_aws() {
+  aws iam list-open-id-connect-providers --output json \
+    | jq -e '.OpenIDConnectProviderList[] | select(.Arn | contains("token.actions.githubusercontent.com"))' >/dev/null
+}
+
+resolve_create_github_oidc_provider_for_plan() {
   export_local_state_passphrase
-  TF_VAR_create_github_oidc_provider="${TF_VAR_create_github_oidc_provider:-true}"
+  if [ -n "$CREATE_GITHUB_OIDC_PROVIDER_OVERRIDE" ]; then
+    TF_VAR_create_github_oidc_provider="$CREATE_GITHUB_OIDC_PROVIDER_OVERRIDE"
+    log "create_github_oidc_provider=${TF_VAR_create_github_oidc_provider} (command-line override)"
+  elif github_oidc_provider_exists_in_aws; then
+    TF_VAR_create_github_oidc_provider=false
+    log "create_github_oidc_provider=false (existing GitHub OIDC provider found in AWS)"
+  else
+    TF_VAR_create_github_oidc_provider=true
+    log "create_github_oidc_provider=true (no GitHub OIDC provider in AWS)"
+  fi
   export TF_VAR_create_github_oidc_provider
 }
 
 ensure_github_oidc_provider() {
-  if aws iam list-open-id-connect-providers --output json \
-    | jq -e '.OpenIDConnectProviderList[] | select(.Arn | contains("token.actions.githubusercontent.com"))' >/dev/null; then
+  local -a oidc_thumbs
+  if github_oidc_provider_exists_in_aws; then
     log "GitHub OIDC provider already exists"
     return 0
   fi
   log "Creating GitHub OIDC provider"
+  read -ra oidc_thumbs <<< "$(read_github_oidc_thumbprints)"
   aws iam create-open-id-connect-provider \
     --url "$GITHUB_OIDC_URL" \
     --client-id-list sts.amazonaws.com \
-    --thumbprint-list "$GITHUB_OIDC_THUMBPRINT" >/dev/null
+    --thumbprint-list "${oidc_thumbs[@]}" >/dev/null
 }
 
 confirm_apply() {
@@ -196,7 +228,7 @@ bootstrap_dir() { printf '%s/infra/opentofu/bootstrap' "$REPO_ROOT"; }
 github_setup_dir() { printf '%s/infra/opentofu/github-setup' "$REPO_ROOT"; }
 
 bootstrap_plan() {
-  export_bootstrap_tofu_vars
+  resolve_create_github_oidc_provider_for_plan
   local dir
   dir="$(bootstrap_dir)"
   tofu_init "$dir"
@@ -205,7 +237,7 @@ bootstrap_plan() {
 }
 
 bootstrap_apply() {
-  export_bootstrap_tofu_vars
+  export_local_state_passphrase
   local dir
   dir="$(bootstrap_dir)"
   if [ ! -f "${dir}/tfplan" ]; then
@@ -335,6 +367,10 @@ parse_global_args() {
       --repo-root) REPO_ROOT=$2; shift 2 ;;
       --baseline-tag-commit) BASELINE_TAG_COMMIT=$2; shift 2 ;;
       --push-baseline-tag) PUSH_BASELINE_TAG=1; shift ;;
+      --create-github-oidc-provider)
+        CREATE_GITHUB_OIDC_PROVIDER_OVERRIDE=$2
+        shift 2
+        ;;
       --yes) AUTO_YES=1; shift ;;
       --dry-run) DRY_RUN=1; shift ;;
       -h|--help) usage ;;
@@ -372,6 +408,15 @@ main() {
     log "jq is required"
     exit 1
   fi
+
+  case "${COMMAND[0]}-${COMMAND[1]:-}" in
+    bootstrap-plan|all-plan|all-setup)
+      if ! command -v aws >/dev/null 2>&1; then
+        log "aws CLI is required for bootstrap plan (OIDC provider detection)"
+        exit 1
+      fi
+      ;;
+  esac
 
   case "${COMMAND[0]}" in
     oidc)
