@@ -28,9 +28,28 @@ env:
   AWS_REGION: us-east-1
 
 jobs:
+  validate:
+    name: tofu validate staging (offline)
+    if: github.event_name == 'pull_request' && vars.TOFU_STATE_AWS_ROLE_ARN == ''
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/opentofu/staging
+    env:
+      TF_VAR_railway_token: placeholder
+      TF_VAR_sentry_dsn: https://example@sentry.io/0
+      TF_VAR_state_encryption_passphrase: ci-offline-validate-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+      - run: tofu init -backend=false -input=false
+      - run: tofu validate
+
   plan:
     name: tofu plan staging
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && vars.TOFU_STATE_AWS_ROLE_ARN != ''
     runs-on: ubuntu-latest
     permissions:
       contents: read
