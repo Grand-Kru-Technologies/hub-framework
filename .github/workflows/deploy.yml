@@ -85,6 +85,7 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
+          fetch-tags: true
       - name: Configure git identity for annotated tags
         run: |
           git config user.name "github-actions[bot]"

@@ -18,7 +18,7 @@ variable "github_repository" {
 
 variable "github_oidc_thumbprint" {
   type        = string
-  default     = "6938fd4d98bab03fa76833955d3977e6238c545d95269e4827dfeec8c568503a"
+  default     = "6938fd4e787b04b6bd9bf7d0bcfd543250d3123f"
   description = "Thumbprint for token.actions.githubusercontent.com (rotate if GitHub rotates their cert)."
 }
 
