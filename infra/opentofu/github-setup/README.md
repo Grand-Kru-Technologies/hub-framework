@@ -1,24 +1,16 @@
 # GitHub repository setup (environments and variables)
 
-Defines repository configuration for staging OpenTofu:
+OpenTofu stack for GitHub environments, IAM role variables, and staging encryption secrets.
 
-- Environment `staging-opentofu-plan` for plan jobs on `main`
-- Environment `staging-opentofu` on `main` only (custom branch policy), with configurable required reviewers
-- Repository variables for plan and apply IAM role ARNs
-- Environment secrets for staging remote state encryption on both environments
-
-Requires an admin GitHub personal access token (`GITHUB_ADMIN_TOKEN`). Not applied from CI.
-
-Default reviewers: `mnyon-grandkru` with `prevent_self_review = false` so Mark can self-approve until a second reviewer is added.
-
-Local backend state is encrypted with the same `LOCAL_STATE_ENCRYPTION_PASSPHRASE` used for bootstrap.
-
-Run via:
+Requires an admin GitHub personal access token in Doppler as `GITHUB_ADMIN_TOKEN`. Not applied from CI.
 
 ```sh
-./scripts/setup-staging-opentofu.sh
+doppler run --project hub-framework --config staging -- \
+  ./scripts/setup-staging-opentofu.sh github-setup plan
+doppler run --project hub-framework --config staging -- \
+  ./scripts/setup-staging-opentofu.sh github-setup apply
 ```
 
-Railway and Sentry credentials remain manual repository secrets (`RAILWAY_TOKEN`, `STAGING_SENTRY_DSN`).
+Default apply reviewers: `mnyon-grandkru` with `prevent_self_review = false` (Mark can self-approve until a second reviewer is added).
 
-Backup the generated staging encryption passphrase in Doppler (hub-framework staging config).
+Plan environment `staging-opentofu-plan` and apply environment `staging-opentofu` both restrict deployments to branch `main`.

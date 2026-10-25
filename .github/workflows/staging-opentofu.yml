@@ -97,19 +97,30 @@ jobs:
       TF_VAR_sentry_dsn: ${{ secrets.STAGING_SENTRY_DSN }}
       TF_VAR_state_encryption_passphrase: ${{ secrets.TOFU_STATE_ENCRYPTION_PASSPHRASE }}
     steps:
+      - name: Skip when setup not complete
+        if: vars.TOFU_STATE_AWS_PLAN_ROLE_ARN == ''
+        run: |
+          echo "::notice title=OpenTofu plan skipped::TOFU_STATE_AWS_PLAN_ROLE_ARN is not set. Run scripts/setup-staging-opentofu.sh (bootstrap + github-setup) before credentialed plan on main."
       - uses: actions/checkout@v4
+        if: vars.TOFU_STATE_AWS_PLAN_ROLE_ARN != ''
       - uses: opentofu/setup-opentofu@v1
+        if: vars.TOFU_STATE_AWS_PLAN_ROLE_ARN != ''
         with:
           tofu_version: ${{ env.TOFU_VERSION }}
       - name: Configure AWS (OIDC plan role)
+        if: vars.TOFU_STATE_AWS_PLAN_ROLE_ARN != ''
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.TOFU_STATE_AWS_PLAN_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - run: tofu init -input=false
+        if: vars.TOFU_STATE_AWS_PLAN_ROLE_ARN != ''
       - run: tofu plan -input=false -no-color -out=tfplan
+        if: vars.TOFU_STATE_AWS_PLAN_ROLE_ARN != ''
       - run: tofu validate
+        if: vars.TOFU_STATE_AWS_PLAN_ROLE_ARN != ''
       - uses: actions/upload-artifact@v4
+        if: vars.TOFU_STATE_AWS_PLAN_ROLE_ARN != ''
         with:
           name: staging-tofu-plan
           path: infra/opentofu/staging/tfplan
@@ -148,6 +159,10 @@ jobs:
           set -euo pipefail
           if [ -z "${PLAN_RUN_ID:-}" ]; then
             echo "::error::plan_run_id is required when workflow_action is apply"
+            exit 1
+          fi
+          if ! [[ "$PLAN_RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::plan_run_id must be a numeric Actions run id, got: ${PLAN_RUN_ID}"
             exit 1
           fi
           RUN_JSON="$(gh api "repos/${EXPECTED_REPO}/actions/runs/${PLAN_RUN_ID}")"

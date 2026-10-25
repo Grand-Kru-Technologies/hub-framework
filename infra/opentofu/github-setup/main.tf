@@ -6,6 +6,17 @@ data "github_user" "apply_reviewer" {
 resource "github_repository_environment" "plan" {
   repository  = var.github_repository
   environment = var.plan_environment_name
+
+  deployment_branch_policy {
+    protected_branches     = false
+    custom_branch_policies = true
+  }
+}
+
+resource "github_repository_environment_deployment_policy" "plan_main" {
+  repository     = var.github_repository
+  environment    = github_repository_environment.plan.environment
+  branch_pattern = "main"
 }
 
 resource "github_repository_environment" "apply" {

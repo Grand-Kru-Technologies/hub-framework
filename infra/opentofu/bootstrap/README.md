@@ -1,17 +1,14 @@
 # Bootstrap (AWS remote state and OIDC roles)
 
-One-time stack that provisions:
+OpenTofu stack for S3 remote state, IAM plan/apply roles, and TLS-only bucket policy.
 
-- Versioned S3 bucket with SSE-S3, TLS-only bucket policy, lifecycle on noncurrent versions, and `prevent_destroy`
-- Read-only IAM role for plan jobs (exact state read plus lock object write/delete only)
-- Write IAM role trusted only from the `staging-opentofu` environment on `main`
-
-Uses the existing account GitHub OIDC provider (`data.aws_iam_openid_connect_provider`). The setup script creates the provider when it is missing.
-
-Local backend state is encrypted with `LOCAL_STATE_ENCRYPTION_PASSPHRASE` (separate from staging remote state encryption).
-
-Prefer the repository setup script instead of running this directory in isolation:
+Run through the repository setup script (recommended):
 
 ```sh
-./scripts/setup-staging-opentofu.sh
+doppler run --project hub-framework --config staging -- \
+  ./scripts/setup-staging-opentofu.sh bootstrap plan
+doppler run --project hub-framework --config staging -- \
+  ./scripts/setup-staging-opentofu.sh bootstrap apply
 ```
+
+Local backend state is encrypted; the passphrase lives in Doppler as `LOCAL_STATE_ENCRYPTION_PASSPHRASE`.
