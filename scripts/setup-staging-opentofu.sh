@@ -160,11 +160,19 @@ github_oidc_provider_exists_in_aws() {
     | jq -e '.OpenIDConnectProviderList[] | select(.Arn | contains("token.actions.githubusercontent.com"))' >/dev/null
 }
 
+github_oidc_provider_in_bootstrap_state() {
+  (cd "$(bootstrap_dir)" && tofu state list -no-color 2>/dev/null) \
+    | grep -q 'aws_iam_openid_connect_provider\.github'
+}
+
 resolve_create_github_oidc_provider_for_plan() {
   export_local_state_passphrase
   if [ -n "$CREATE_GITHUB_OIDC_PROVIDER_OVERRIDE" ]; then
     TF_VAR_create_github_oidc_provider="$CREATE_GITHUB_OIDC_PROVIDER_OVERRIDE"
     log "create_github_oidc_provider=${TF_VAR_create_github_oidc_provider} (command-line override)"
+  elif github_oidc_provider_in_bootstrap_state; then
+    TF_VAR_create_github_oidc_provider=true
+    log "create_github_oidc_provider=true (GitHub OIDC provider managed in bootstrap state)"
   elif github_oidc_provider_exists_in_aws; then
     TF_VAR_create_github_oidc_provider=false
     log "create_github_oidc_provider=false (existing GitHub OIDC provider found in AWS)"
@@ -228,10 +236,11 @@ bootstrap_dir() { printf '%s/infra/opentofu/bootstrap' "$REPO_ROOT"; }
 github_setup_dir() { printf '%s/infra/opentofu/github-setup' "$REPO_ROOT"; }
 
 bootstrap_plan() {
-  resolve_create_github_oidc_provider_for_plan
   local dir
   dir="$(bootstrap_dir)"
+  export_local_state_passphrase
   tofu_init "$dir"
+  resolve_create_github_oidc_provider_for_plan
   tofu_plan_stack "$dir" tfplan
   log "Bootstrap plan written to ${dir}/tfplan"
 }
