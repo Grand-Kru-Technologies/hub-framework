@@ -27,7 +27,7 @@ func (h rootHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "ok")
 		return
 	}
-	if strings.HasPrefix(r.URL.Path, "/smokeApp/") && os.Getenv("ENABLE_SMOKE_FORWARD") != "true" {
+	if strings.HasPrefix(strings.ToLower(r.URL.Path), "/smokeapp/") && os.Getenv("ENABLE_SMOKE_FORWARD") != "true" {
 		http.NotFound(w, r)
 		return
 	}
