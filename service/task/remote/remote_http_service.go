@@ -29,12 +29,12 @@ type ForwardingService struct {
 func NewForwardingService(config map[string]interface{}) (entity.Task, error) {
 	svc := ForwardingService{}
 
-	if host, ok := config["host"].(string); ok && host != "" {
-		svc.Host = host
+	host, err := resolveHTTPServiceHost(config)
+	if err != nil {
+		reportHTTPServiceConfigError(config, err, "config_host")
+		return nil, err
 	}
-	if svc.Host == "" {
-		return nil, fmt.Errorf("HttpService config requires non-empty host")
-	}
+	svc.Host = host
 
 	if pathPrefix, ok := config["pathprefix"].(string); ok {
 		svc.PathPrefix = remoteforward.NormalizePathPrefix(pathPrefix)
@@ -105,6 +105,24 @@ func NewForwardingService(config map[string]interface{}) (entity.Task, error) {
 	svc.reporter = opts.Reporter
 
 	return &svc, nil
+}
+
+func resolveHTTPServiceHost(config map[string]interface{}) (string, error) {
+	host, _ := config["host"].(string)
+	if host == "" {
+		return "", fmt.Errorf("HttpService config requires non-empty host")
+	}
+	if err := remoteforward.ValidateForwardHost(host); err != nil {
+		return "", err
+	}
+	return host, nil
+}
+
+func reportHTTPServiceConfigError(config map[string]interface{}, err error, stage string) {
+	log := remoteforward.ComponentLogger("remote_task_forwarder")
+	reporter := remoteforward.NewErrorReporter(remoteforward.ResolveSentryDSN(config))
+	log.Error().Err(err).Str("stage", stage).Msg("HttpService configuration rejected")
+	reporter.ReportError(err, stage)
 }
 
 func (fs *ForwardingService) Apply(ctx context.Context, request entity.ServiceRequest) error {

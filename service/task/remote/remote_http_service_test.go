@@ -41,6 +41,30 @@ func TestNewForwardingService_RequiresHost(t *testing.T) {
 	assert.Contains(t, err.Error(), "host")
 }
 
+func TestNewForwardingService_RejectsInvalidForwardHost(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		host string
+	}{
+		{name: "ftp", host: "ftp://upstream.example"},
+		{name: "bare hostname", host: "upstream.example"},
+		{name: "userinfo on invalid scheme", host: "ws://user:leaked-password@upstream.example"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := NewForwardingService(testTaskConfig(tt.host, nil))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "absolute http or https URL")
+			assert.NotContains(t, err.Error(), "leaked-password")
+		})
+	}
+}
+
 func TestNewForwardingService_AcceptsIntegerMaxRetries(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
