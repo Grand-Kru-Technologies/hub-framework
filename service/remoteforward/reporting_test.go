@@ -3,6 +3,8 @@ package remoteforward
 import (
 	"errors"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/QueerGlobal/hub-framework/util"
@@ -60,4 +62,33 @@ func TestNewErrorReporter_NoopWhenDSNEmpty(t *testing.T) {
 	r := NewErrorReporter("")
 	_, ok := r.(noopErrorReporter)
 	require.True(t, ok)
+}
+
+func TestNewErrorReporter_InitializesSentryOnce(t *testing.T) {
+	const testDSN = "https://01234567890123456789012345678901@example.com/1"
+	const workers = 64
+
+	before := atomic.LoadInt64(&sentryInitInvocationCount)
+
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			r := NewErrorReporter(testDSN)
+			require.NotNil(t, r)
+			_, isNoop := r.(noopErrorReporter)
+			require.False(t, isNoop)
+		}()
+	}
+	wg.Wait()
+
+	assert.Equal(t, before+1, atomic.LoadInt64(&sentryInitInvocationCount))
+
+	for repeat := 0; repeat < 8; repeat++ {
+		r := NewErrorReporter(testDSN)
+		_, isNoop := r.(noopErrorReporter)
+		require.False(t, isNoop)
+	}
+	assert.Equal(t, before+1, atomic.LoadInt64(&sentryInitInvocationCount))
 }

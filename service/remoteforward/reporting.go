@@ -3,6 +3,8 @@ package remoteforward
 import (
 	"errors"
 	"fmt"
+	"sync"
+	"sync/atomic"
 
 	"github.com/QueerGlobal/hub-framework/service/logging"
 	"github.com/QueerGlobal/hub-framework/util"
@@ -24,30 +26,44 @@ func NoopErrorReporter() ErrorReporter {
 	return noopErrorReporter{}
 }
 
+var (
+	sentryInitOnce            sync.Once
+	sentryInitOK              bool
+	sentryInitInvocationCount int64
+)
+
+func initSentryClient(dsn string) bool {
+	sentryInitOnce.Do(func() {
+		atomic.AddInt64(&sentryInitInvocationCount, 1)
+		err := sentry.Init(sentry.ClientOptions{
+			Dsn:              dsn,
+			AttachStacktrace: true,
+		})
+		if err != nil {
+			logging.GetLogger().Error().
+				Err(err).
+				Str("stage", "sentry_init").
+				Msg("remote forward Sentry init failed; error reporting disabled")
+			sentryInitOK = false
+			return
+		}
+		sentryInitOK = true
+	})
+	return sentryInitOK
+}
+
 // NewErrorReporter returns a Sentry-backed reporter when dsn is non-empty, otherwise a no-op.
 func NewErrorReporter(dsn string) ErrorReporter {
 	if dsn == "" {
 		return NoopErrorReporter()
 	}
-	return newSentryReporter(dsn)
-}
-
-type sentryReporter struct{}
-
-func newSentryReporter(dsn string) ErrorReporter {
-	err := sentry.Init(sentry.ClientOptions{
-		Dsn:              dsn,
-		AttachStacktrace: true,
-	})
-	if err != nil {
-		logging.GetLogger().Error().
-			Err(err).
-			Str("stage", "sentry_init").
-			Msg("remote forward Sentry init failed; error reporting disabled")
+	if !initSentryClient(dsn) {
 		return NoopErrorReporter()
 	}
 	return &sentryReporter{}
 }
+
+type sentryReporter struct{}
 
 func (s *sentryReporter) ReportError(err error, stage string) {
 	if err == nil {
