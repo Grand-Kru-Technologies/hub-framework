@@ -3,19 +3,15 @@
 One-time stack that provisions:
 
 - Versioned S3 bucket with SSE-S3, TLS-only bucket policy, lifecycle on noncurrent versions, and `prevent_destroy`
-- Read-only IAM role for plan jobs (prefix `hub-framework/staging/` only)
+- Read-only IAM role for plan jobs (exact state read plus lock object write/delete only)
 - Write IAM role trusted only from the `staging-opentofu` environment on `main`
-- Random client-side state encryption passphrase (sensitive output)
 
-Uses the existing account GitHub OIDC provider (`data.aws_iam_openid_connect_provider`). If that provider is missing, create it once in AWS (thumbprint is the 40-character SHA-1 fingerprint for `token.actions.githubusercontent.com`) before running this stack.
+Uses the existing account GitHub OIDC provider (`data.aws_iam_openid_connect_provider`). The setup script creates the provider when it is missing.
 
-Local backend only. Apply with administrative AWS credentials.
+Local backend state is encrypted with `LOCAL_STATE_ENCRYPTION_PASSPHRASE` (separate from staging remote state encryption).
+
+Prefer the repository setup script instead of running this directory in isolation:
 
 ```sh
-cd infra/opentofu/bootstrap
-tofu init
-tofu plan
-tofu apply
+./scripts/setup-staging-opentofu.sh
 ```
-
-Then run the GitHub setup stack in `../github-setup/` (not applied from CI) to create environments, repository variables, and the encryption secret.

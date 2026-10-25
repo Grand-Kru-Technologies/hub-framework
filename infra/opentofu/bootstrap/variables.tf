@@ -39,3 +39,15 @@ variable "tofu_apply_role_name" {
   default     = "hub-framework-staging-tofu-apply"
   description = "IAM role name for apply access."
 }
+
+variable "staging_state_key" {
+  type        = string
+  default     = "hub-framework/staging/terraform.tfstate"
+  description = "S3 object key for staging remote state (must match staging/versions.tf backend key)."
+}
+
+variable "local_state_encryption_passphrase" {
+  type        = string
+  sensitive   = true
+  description = "Passphrase for encrypting this stack's local terraform.tfstate (operator-supplied; not the staging remote state secret)."
+}

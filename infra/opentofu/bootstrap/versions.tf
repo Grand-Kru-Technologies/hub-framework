@@ -6,19 +6,33 @@ terraform {
       source  = "hashicorp/aws"
       version = "= 5.73.0"
     }
-    random = {
-      source  = "hashicorp/random"
-      version = "= 3.6.3"
-    }
   }
 
   backend "local" {
     path = "terraform.tfstate"
+  }
+
+  encryption {
+    key_provider "pbkdf2" "local" {
+      passphrase = var.local_state_encryption_passphrase
+    }
+
+    method "aes_gcm" "local" {
+      keys = key_provider.pbkdf2.local
+    }
+
+    state {
+      method   = method.aes_gcm.local
+      enforced = true
+    }
+
+    plan {
+      method   = method.aes_gcm.local
+      enforced = true
+    }
   }
 }
 
 provider "aws" {
   region = var.aws_region
 }
-
-provider "random" {}

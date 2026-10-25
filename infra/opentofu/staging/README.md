@@ -4,22 +4,11 @@ Declares staging Railway service variables for hub-app:
 
 - `SENTRY_DSN` (remote forward error reporting)
 
-State uses the S3 backend in `versions.tf` with SSE-S3 and client-side encryption (passphrase via environment secret `TOFU_STATE_ENCRYPTION_PASSPHRASE`).
+State uses the S3 backend in `versions.tf` with SSE-S3 and client-side encryption.
 
-## Bootstrap and GitHub setup
+Pull requests run offline `tofu validate` for bootstrap, github-setup, and staging (no Railway or AWS credentials).
 
-1. Apply `infra/opentofu/bootstrap/` once with admin AWS credentials.
-2. Apply `infra/opentofu/github-setup/` once with an admin GitHub token (not run from CI).
-
-## CI
-
-Pull requests and `main` pushes run `tofu plan` under environment `staging-opentofu-plan` and upload `staging-tofu-plan`.
-
-Apply runs only on `main` through environment `staging-opentofu`, after verifying the plan run commit is on `main`, using the saved plan artifact.
-
-Repository secrets still required manually: `RAILWAY_TOKEN`, `STAGING_SENTRY_DSN`.
-
-Variables from GitHub setup: `TOFU_STATE_AWS_PLAN_ROLE_ARN`, `TOFU_STATE_AWS_APPLY_ROLE_ARN`.
+Plan and apply run on `main` only under GitHub environments, using IAM roles from bootstrap.
 
 ## Import existing SENTRY_DSN
 

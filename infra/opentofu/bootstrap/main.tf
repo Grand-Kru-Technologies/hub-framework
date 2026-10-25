@@ -4,11 +4,6 @@ data "aws_iam_openid_connect_provider" "github" {
   url = "https://token.actions.githubusercontent.com"
 }
 
-resource "random_password" "state_encryption" {
-  length  = 32
-  special = true
-}
-
 resource "aws_s3_bucket" "tofu_state" {
   bucket = var.state_bucket_name
 
@@ -52,6 +47,8 @@ resource "aws_s3_bucket_lifecycle_configuration" "tofu_state" {
     id     = "expire-noncurrent-versions"
     status = "Enabled"
 
+    filter {}
+
     noncurrent_version_expiration {
       noncurrent_days = 90
     }
@@ -89,8 +86,12 @@ resource "aws_s3_bucket_policy" "tofu_state" {
 }
 
 locals {
-  state_prefix = "hub-framework/staging/"
-  state_objects_arn = "${aws_s3_bucket.tofu_state.arn}/${local.state_prefix}*"
+  state_prefix       = "hub-framework/staging/"
+  staging_state_key  = var.staging_state_key
+  staging_lock_key   = "${var.staging_state_key}.tflock"
+  state_objects_arn  = "${aws_s3_bucket.tofu_state.arn}/${local.state_prefix}*"
+  staging_state_arn  = "${aws_s3_bucket.tofu_state.arn}/${local.staging_state_key}"
+  staging_lock_arn   = "${aws_s3_bucket.tofu_state.arn}/${local.staging_lock_key}"
 }
 
 data "aws_iam_policy_document" "github_plan_assume_role" {
@@ -109,11 +110,9 @@ data "aws_iam_policy_document" "github_plan_assume_role" {
       values   = ["sts.amazonaws.com"]
     }
     condition {
-      test     = "StringLike"
+      test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
       values = [
-        "repo:${var.github_repository}:pull_request",
-        "repo:${var.github_repository}:ref:refs/heads/main",
         "repo:${var.github_repository}:environment:${var.github_plan_environment_name}",
       ]
     }
@@ -140,11 +139,20 @@ data "aws_iam_policy_document" "tofu_state_plan_s3" {
   }
 
   statement {
-    sid = "ReadStagingStateObjects"
+    sid = "ReadStagingStateObject"
     actions = [
       "s3:GetObject",
     ]
-    resources = [local.state_objects_arn]
+    resources = [local.staging_state_arn]
+  }
+
+  statement {
+    sid = "WriteStagingLockObjectOnly"
+    actions = [
+      "s3:PutObject",
+      "s3:DeleteObject",
+    ]
+    resources = [local.staging_lock_arn]
   }
 }
 
@@ -228,12 +236,6 @@ output "github_tofu_plan_role_arn" {
 output "github_tofu_apply_role_arn" {
   value       = aws_iam_role.github_tofu_apply.arn
   description = "Write IAM role for apply jobs (repository variable TOFU_STATE_AWS_APPLY_ROLE_ARN)."
-}
-
-output "state_encryption_passphrase" {
-  value       = random_password.state_encryption.result
-  sensitive   = true
-  description = "Client-side state encryption passphrase (repository secret TOFU_STATE_ENCRYPTION_PASSPHRASE)."
 }
 
 output "aws_account_id" {

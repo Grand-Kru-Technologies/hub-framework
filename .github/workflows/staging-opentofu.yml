@@ -4,21 +4,26 @@ on:
   pull_request:
     paths:
       - "infra/opentofu/**"
+      - "infra/.gitignore"
       - ".github/workflows/staging-opentofu.yml"
   push:
     branches: [main]
     paths:
       - "infra/opentofu/**"
+      - "infra/.gitignore"
       - ".github/workflows/staging-opentofu.yml"
   workflow_dispatch:
     inputs:
-      confirm_apply:
-        description: "Type apply to apply a saved plan on main (requires staging-opentofu environment approval)"
+      workflow_action:
+        description: "plan saves staging-tofu-plan on main; apply uses plan_run_id"
         required: true
-        type: string
+        type: choice
+        options:
+          - plan
+          - apply
       plan_run_id:
-        description: "Actions run ID from the plan job that uploaded staging-tofu-plan"
-        required: true
+        description: "Required when workflow_action is apply: Actions run id with staging-tofu-plan artifact"
+        required: false
         type: string
 
 permissions:
@@ -31,34 +36,54 @@ concurrency:
 env:
   TOFU_VERSION: 1.10.2
   AWS_REGION: us-east-1
+  WORKFLOW_FILE: .github/workflows/staging-opentofu.yml
 
 jobs:
   validate:
-    name: tofu validate staging (offline)
-    if: >-
-      github.event_name == 'pull_request' &&
-      vars.TOFU_STATE_AWS_PLAN_ROLE_ARN == ''
+    name: tofu validate (offline, all stacks)
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: infra/opentofu/staging
-    env:
-      TF_VAR_railway_token: placeholder
-      TF_VAR_sentry_dsn: https://example@sentry.io/0
-      TF_VAR_state_encryption_passphrase: ci-offline-validate-only
     steps:
       - uses: actions/checkout@v4
       - uses: opentofu/setup-opentofu@v1
         with:
           tofu_version: ${{ env.TOFU_VERSION }}
-      - run: tofu init -backend=false -input=false
-      - run: tofu validate
+      - name: validate bootstrap
+        working-directory: infra/opentofu/bootstrap
+        env:
+          TF_VAR_local_state_encryption_passphrase: ci-offline-validate-only-passphrase
+        run: |
+          tofu init -backend=false -input=false
+          tofu validate
+      - name: validate github-setup
+        working-directory: infra/opentofu/github-setup
+        env:
+          TF_VAR_github_token: placeholder
+          TF_VAR_tofu_plan_role_arn: arn:aws:iam::123456789012:role/plan
+          TF_VAR_tofu_apply_role_arn: arn:aws:iam::123456789012:role/apply
+          TF_VAR_state_encryption_passphrase: ci-offline-validate-only-passphrase
+          TF_VAR_local_state_encryption_passphrase: ci-offline-validate-only-passphrase
+        run: |
+          tofu init -backend=false -input=false
+          tofu validate
+      - name: validate staging
+        working-directory: infra/opentofu/staging
+        env:
+          TF_VAR_railway_token: placeholder
+          TF_VAR_sentry_dsn: https://example@sentry.io/0
+          TF_VAR_state_encryption_passphrase: ci-offline-validate-only-passphrase
+        run: |
+          tofu init -backend=false -input=false
+          tofu validate
 
   plan:
     name: tofu plan staging
     if: >-
-      (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) &&
-      vars.TOFU_STATE_AWS_PLAN_ROLE_ARN != ''
+      github.ref == 'refs/heads/main' &&
+      (
+        github.event_name == 'push' ||
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.workflow_action == 'plan')
+      )
     runs-on: ubuntu-latest
     environment: staging-opentofu-plan
     permissions:
@@ -95,7 +120,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' &&
       github.ref == 'refs/heads/main' &&
-      github.event.inputs.confirm_apply == 'apply'
+      github.event.inputs.workflow_action == 'apply'
     runs-on: ubuntu-latest
     environment: staging-opentofu
     permissions:
@@ -113,15 +138,43 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Verify plan run commit is on main
+      - name: Verify plan workflow run
         env:
           GH_TOKEN: ${{ github.token }}
           PLAN_RUN_ID: ${{ github.event.inputs.plan_run_id }}
+          EXPECTED_REPO: ${{ github.repository }}
+          EXPECTED_WORKFLOW: ${{ env.WORKFLOW_FILE }}
         run: |
           set -euo pipefail
-          PLAN_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${PLAN_RUN_ID}" --jq .head_sha)"
-          if [ -z "$PLAN_SHA" ] || [ "$PLAN_SHA" = "null" ]; then
-            echo "::error::Could not resolve head_sha for plan run ${PLAN_RUN_ID}"
+          if [ -z "${PLAN_RUN_ID:-}" ]; then
+            echo "::error::plan_run_id is required when workflow_action is apply"
+            exit 1
+          fi
+          RUN_JSON="$(gh api "repos/${EXPECTED_REPO}/actions/runs/${PLAN_RUN_ID}")"
+          RUN_REPO="$(echo "$RUN_JSON" | jq -r .repository.full_name)"
+          RUN_PATH="$(echo "$RUN_JSON" | jq -r .path)"
+          RUN_EVENT="$(echo "$RUN_JSON" | jq -r .event)"
+          RUN_BRANCH="$(echo "$RUN_JSON" | jq -r .head_branch)"
+          RUN_CONCLUSION="$(echo "$RUN_JSON" | jq -r .conclusion)"
+          PLAN_SHA="$(echo "$RUN_JSON" | jq -r .head_sha)"
+          if [ "$RUN_REPO" != "$EXPECTED_REPO" ]; then
+            echo "::error::Plan run repository mismatch: ${RUN_REPO}"
+            exit 1
+          fi
+          if [ "$RUN_PATH" != "$EXPECTED_WORKFLOW" ]; then
+            echo "::error::Plan run workflow path mismatch: ${RUN_PATH}"
+            exit 1
+          fi
+          if [ "$RUN_EVENT" != "push" ] && [ "$RUN_EVENT" != "workflow_dispatch" ]; then
+            echo "::error::Plan run event must be push or workflow_dispatch, got ${RUN_EVENT}"
+            exit 1
+          fi
+          if [ "$RUN_BRANCH" != "main" ]; then
+            echo "::error::Plan run head_branch must be main, got ${RUN_BRANCH}"
+            exit 1
+          fi
+          if [ "$RUN_CONCLUSION" != "success" ]; then
+            echo "::error::Plan run conclusion must be success, got ${RUN_CONCLUSION}"
             exit 1
           fi
           git fetch origin main
@@ -129,7 +182,7 @@ jobs:
             echo "::error::Plan run commit ${PLAN_SHA} is not reachable from origin/main"
             exit 1
           fi
-          echo "Plan run commit ${PLAN_SHA} is on main"
+          echo "Verified plan run ${PLAN_RUN_ID} at ${PLAN_SHA}"
       - uses: opentofu/setup-opentofu@v1
         with:
           tofu_version: ${{ env.TOFU_VERSION }}

@@ -11,6 +11,26 @@ terraform {
   backend "local" {
     path = "terraform.tfstate"
   }
+
+  encryption {
+    key_provider "pbkdf2" "local" {
+      passphrase = var.local_state_encryption_passphrase
+    }
+
+    method "aes_gcm" "local" {
+      keys = key_provider.pbkdf2.local
+    }
+
+    state {
+      method   = method.aes_gcm.local
+      enforced = true
+    }
+
+    plan {
+      method   = method.aes_gcm.local
+      enforced = true
+    }
+  }
 }
 
 provider "github" {
