@@ -79,13 +79,13 @@ cleanup() { rm -rf "$TMPDIR"; }
 trap cleanup EXIT
 chmod 700 "$TMPDIR"
 
-STAGING_PASS_FILE="$TMPDIR/staging-passphrase"
+STAGING_PASS_FILE="$(mktemp)"
+chmod 600 "$STAGING_PASS_FILE"
 if [ -n "${STAGING_STATE_ENCRYPTION_PASSPHRASE:-}" ]; then
   printf '%s' "$STAGING_STATE_ENCRYPTION_PASSPHRASE" >"$STAGING_PASS_FILE"
 else
-  openssl rand -base64 32 >"$STAGING_PASS_FILE"
+  openssl rand -base64 32 | tr -d '\n' >"$STAGING_PASS_FILE"
 fi
-chmod 600 "$STAGING_PASS_FILE"
 
 ensure_github_oidc_provider
 
