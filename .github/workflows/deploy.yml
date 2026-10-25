@@ -97,7 +97,7 @@ jobs:
       - name: Ensure baseline tag exists once
         run: |
           if ! git rev-parse hub-framework-staging-baseline >/dev/null 2>&1; then
-            git tag -a hub-framework-staging-baseline -m "Baseline before automated deploy tags" "$(git rev-list --max-parents=0 HEAD)"
+            git tag -a hub-framework-staging-baseline -m "Pre remote-forward-fix baseline (main 1583326b)" 1583326b
             git push origin hub-framework-staging-baseline
           fi
       - name: Tag this deploy

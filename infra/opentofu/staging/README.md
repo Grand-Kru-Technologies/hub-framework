@@ -1,23 +1,42 @@
 # Staging OpenTofu (Railway variables)
 
-This stack declares staging `SENTRY_DSN` for hub-app so error reporting is managed as code instead of a manual Railway dashboard edit.
+Declares staging Railway service variables for hub-app:
 
-## Apply (not run from CI by default)
+- `SENTRY_DSN` (optional error reporting for remote forwarders)
+- `PYTHON_HANDLER_URL` (internal python-handler URL)
 
-From this directory:
+State is stored in the encrypted S3 backend configured in `versions.tf`.
+
+## CI
+
+Pull requests that touch this directory run `tofu plan` via `.github/workflows/staging-opentofu.yml`.
+
+Apply runs only from a manual workflow dispatch when the `confirm_apply` input is exactly `apply`.
+
+Required repository secrets for plan/apply:
+
+- `RAILWAY_TOKEN`
+- `STAGING_SENTRY_DSN`
+- `TOFU_STATE_AWS_ACCESS_KEY_ID`
+- `TOFU_STATE_AWS_SECRET_ACCESS_KEY`
+
+The state bucket `qg-hub-staging-tofu-state` must exist with encryption enabled before the first init.
+
+## Import existing SENTRY_DSN
+
+`main.tf` includes an import block for an existing `SENTRY_DSN` variable. If Railway uses a different import id format, adjust the import `id` after `tofu plan` reports the expected value.
+
+## Local apply (operators only)
 
 ```sh
+cd infra/opentofu/staging
 export TF_VAR_railway_token="$RAILWAY_TOKEN"
 export TF_VAR_sentry_dsn="$SENTRY_DSN"
+export AWS_ACCESS_KEY_ID=...
+export AWS_SECRET_ACCESS_KEY=...
 tofu init
 tofu plan
 tofu apply
 ```
 
-Requirements:
-
-- OpenTofu or Terraform 1.6+
-- A Railway project token with access to `qg-hub-staging` / staging
-- The Sentry DSN value from your Sentry project (store in your team secret manager, not in git)
-
-After apply, redeploy hub-app so the new variable is picked up (for example via `.github/workflows/deploy.yml` once Railway credentials are configured on the repo).
+Redeploy hub-app after apply so new variables load.

@@ -1,0 +1,63 @@
+name: Staging OpenTofu
+
+on:
+  pull_request:
+    paths:
+      - "infra/opentofu/**"
+      - ".github/workflows/staging-opentofu.yml"
+  workflow_dispatch:
+    inputs:
+      confirm_apply:
+        description: "Type apply to run tofu apply on staging (requires secrets and backend access)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: staging-opentofu
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: tofu plan staging
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/opentofu/staging
+    env:
+      TF_VAR_railway_token: ${{ secrets.RAILWAY_TOKEN }}
+      TF_VAR_sentry_dsn: ${{ secrets.STAGING_SENTRY_DSN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.TOFU_STATE_AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.TOFU_STATE_AWS_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: 1.9.0
+      - run: tofu init -input=false
+      - run: tofu plan -input=false -no-color
+      - run: tofu validate
+
+  apply:
+    name: tofu apply staging
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.confirm_apply == 'apply'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/opentofu/staging
+    env:
+      TF_VAR_railway_token: ${{ secrets.RAILWAY_TOKEN }}
+      TF_VAR_sentry_dsn: ${{ secrets.STAGING_SENTRY_DSN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.TOFU_STATE_AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.TOFU_STATE_AWS_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: 1.9.0
+      - run: tofu init -input=false
+      - run: tofu apply -input=false -auto-approve -no-color
