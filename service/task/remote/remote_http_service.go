@@ -5,13 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/QueerGlobal/hub-framework/core/entity"
+	"github.com/QueerGlobal/hub-framework/service/logging"
+	"github.com/QueerGlobal/hub-framework/service/remoteforward"
 	"github.com/QueerGlobal/hub-framework/util"
+	"github.com/rs/zerolog"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 )
@@ -21,6 +23,9 @@ type ForwardingService struct {
 	PathPrefix string
 	name       string
 	backoff    *util.Backoff
+	client     *http.Client
+	log        zerolog.Logger
+	reporter   remoteforward.ErrorReporter
 }
 
 func NewForwardingService(config map[string]interface{}) (entity.Task, error) {
@@ -31,19 +36,7 @@ func NewForwardingService(config map[string]interface{}) (entity.Task, error) {
 	}
 
 	if pathPrefix, ok := config["pathprefix"].(string); ok {
-		if len(pathPrefix) > 0 {
-			// Prepend "/" if it doesn't exist
-			if !strings.HasPrefix(pathPrefix, "/") {
-				pathPrefix = "/" + pathPrefix
-			}
-
-			// Append "/" if it doesn't exist
-			if !strings.HasSuffix(pathPrefix, "/") {
-				pathPrefix = pathPrefix + "/"
-			}
-		}
-
-		svc.PathPrefix = pathPrefix
+		svc.PathPrefix = normalizePathPrefix(pathPrefix)
 	}
 
 	var backoffConfig util.BackoffConfig
@@ -65,38 +58,48 @@ func NewForwardingService(config map[string]interface{}) (entity.Task, error) {
 	backoff := util.NewBackoff(backoffConfig)
 	svc.backoff = backoff
 
+	timeout := 30 * time.Second
+	if rawTimeout, ok := config["clientTimeout"].(float64); ok && rawTimeout > 0 {
+		timeout = time.Duration(rawTimeout) * time.Second
+	}
+	svc.client = &http.Client{Timeout: timeout}
+
+	svc.log = logging.GetLogger().With().Str("component", "remote_task_forwarder").Logger()
+	svc.reporter = remoteforward.NoopErrorReporter()
+
 	return &svc, nil
 }
 
-func (fs *ForwardingService) Apply(ctx context.Context, request entity.ServiceRequest) error {
-	var serviceResponse entity.ServiceRequest
+func normalizePathPrefix(pathPrefix string) string {
+	if len(pathPrefix) == 0 {
+		return pathPrefix
+	}
+	if !strings.HasPrefix(pathPrefix, "/") {
+		pathPrefix = "/" + pathPrefix
+	}
+	if !strings.HasSuffix(pathPrefix, "/") {
+		pathPrefix = pathPrefix + "/"
+	}
+	return pathPrefix
+}
 
+func (fs *ForwardingService) Apply(ctx context.Context, request entity.ServiceRequest) error {
 	err := fs.backoff.ExecuteWithBackoff(func() error {
 		response, err := fs.forwardRequest(ctx, request)
 		if err != nil {
 			return err
 		}
-		defer response.Body.Close()
 
-		body, err := io.ReadAll(response.Body)
+		parsed, err := remoteforward.ReadAndParseResponse(response, fs.log)
 		if err != nil {
-			return fmt.Errorf("%s: %w", util.UnrecoverableErrorMsg, err)
+			return err
 		}
 
-		if err := json.Unmarshal(body, &serviceResponse); err != nil {
-			return fmt.Errorf("error unmarshaling response: %s: %w", util.UnrecoverableErrorMsg, err)
-		}
-
-		responseObj, err := entity.GetResponseFromHttp(response)
-		if err != nil {
-			return fmt.Errorf("error getting response from http: %w", err)
-		}
-
-		request.SetResponse(responseObj)
-
+		request.SetResponse(parsed)
 		return nil
 	})
 	if err != nil {
+		remoteforward.ReportIfExhausted(err, fs.reporter)
 		return err
 	}
 
@@ -118,21 +121,18 @@ func (fs *ForwardingService) forwardRequest(ctx context.Context, request entity.
 		requestPath = request.GetURL().Path
 	}
 
-	urlString := fs.Host + fs.PathPrefix + requestPath
+	urlString := remoteforward.JoinForwardURL(fs.Host, fs.PathPrefix, requestPath)
 
-	req, err := http.NewRequest("POST", urlString, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, urlString, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
 
-	// Inject the trace context into the request headers
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
 
-	// Perform the request
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := fs.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to perform HTTP request: %w", err)
 	}
