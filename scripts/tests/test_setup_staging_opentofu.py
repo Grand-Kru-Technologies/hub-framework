@@ -94,6 +94,10 @@ class StubHarness:
             #!/usr/bin/env bash
             echo "$*" >> "{self.aws_log}"
             if echo "$*" | grep -q "list-open-id-connect-providers"; then
+              if [ "${{STUB_AWS_FAIL:-0}}" = "1" ]; then
+                echo "ExpiredToken" >&2
+                exit 254
+              fi
               if [ "${{STUB_OIDC_EXISTS:-0}}" = "1" ]; then
                 echo '{{"OpenIDConnectProviderList":[{{"Arn":"arn:aws:iam::123:oidc-provider/token.actions.githubusercontent.com"}}]}}'
               else
@@ -356,6 +360,28 @@ class SetupStagingOpentofuStubTest(unittest.TestCase):
         )
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("Doppler error", proc.stderr)
+
+    def test_aws_list_oidc_failure_stops_before_bootstrap_plan(self):
+        self.h.doppler_file.write_text(json.dumps({"LOCAL_STATE_ENCRYPTION_PASSPHRASE": SECRET_LOCAL}))
+        proc = self.h.run(
+            "--repo-root", str(self.h.repo_root), "bootstrap", "plan", STUB_AWS_FAIL="1"
+        )
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("AWS error listing OIDC providers", proc.stderr)
+        self.assertNotIn(" plan ", self.h.tofu_log.read_text())
+
+    def test_create_github_oidc_provider_override_rejects_invalid(self):
+        proc = self.h.run(
+            "--repo-root",
+            str(self.h.repo_root),
+            "--create-github-oidc-provider",
+            "yes",
+            "--dry-run",
+            "bootstrap",
+            "plan",
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("--create-github-oidc-provider must be true or false", proc.stderr)
 
     def test_all_plan_only_bootstrap(self):
         self.h.doppler_file.write_text(json.dumps({"LOCAL_STATE_ENCRYPTION_PASSPHRASE": SECRET_LOCAL}))

@@ -1,5 +1,5 @@
 # GitHub Actions OIDC thumbprints (published):
-# https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services
+# https://github.blog/changelog/2023-06-27-github-actions-update-on-oidc-integration-with-aws/
 # AWS IAM requires a thumbprint when registering an OIDC provider; for GitHub's endpoint, AWS does not
 # rely on thumbprint validation for ongoing authentication (see AWS IAM OIDC provider documentation).
 # Comma-separated values: github-oidc-thumbprints (same file used by scripts/setup-staging-opentofu.sh).

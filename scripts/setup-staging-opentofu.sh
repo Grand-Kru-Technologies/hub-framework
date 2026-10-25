@@ -155,9 +155,21 @@ read_github_oidc_thumbprints() {
   printf '%s' "$thumbprints" | tr ',' ' '
 }
 
+# Exit 1 on AWS CLI failure. Return 0 if GitHub OIDC provider exists, 1 if not.
 github_oidc_provider_exists_in_aws() {
-  aws iam list-open-id-connect-providers --output json \
-    | jq -e '.OpenIDConnectProviderList[] | select(.Arn | contains("token.actions.githubusercontent.com"))' >/dev/null
+  local err out
+  err="$(mktemp)"
+  if ! out="$(aws iam list-open-id-connect-providers --output json 2>"$err")"; then
+    cat "$err" >&2
+    rm -f "$err"
+    log "AWS error listing OIDC providers; aborting before OpenTofu plan"
+    exit 1
+  fi
+  rm -f "$err"
+  if echo "$out" | jq -e '.OpenIDConnectProviderList[] | select(.Arn | contains("token.actions.githubusercontent.com"))' >/dev/null; then
+    return 0
+  fi
+  return 1
 }
 
 bootstrap_state_manages_github_oidc() {
@@ -378,6 +390,13 @@ parse_global_args() {
       --push-baseline-tag) PUSH_BASELINE_TAG=1; shift ;;
       --create-github-oidc-provider)
         CREATE_GITHUB_OIDC_PROVIDER_OVERRIDE=$2
+        case "$CREATE_GITHUB_OIDC_PROVIDER_OVERRIDE" in
+          true|false) ;;
+          *)
+            log "error: --create-github-oidc-provider must be true or false"
+            exit 1
+            ;;
+        esac
         shift 2
         ;;
       --yes) AUTO_YES=1; shift ;;
