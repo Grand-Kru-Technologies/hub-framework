@@ -55,7 +55,7 @@ variable "local_state_encryption_passphrase" {
 variable "create_github_oidc_provider" {
   type        = bool
   default     = true
-  description = "When true, create the GitHub Actions OIDC provider in this account. When false, look up an existing provider (plan fails if it is missing)."
+  description = "When true, create the GitHub Actions OIDC provider in this account. When false, look up an existing provider (plan fails if it is missing). Do not flip to false after this stack has created the provider; the resource uses prevent_destroy."
 }
 
 variable "github_oidc_url" {
