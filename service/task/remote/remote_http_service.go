@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -134,6 +135,9 @@ func (fs *ForwardingService) forwardRequest(ctx context.Context, request entity.
 
 	resp, err := fs.client.Do(req)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("%s: %w", util.UnrecoverableErrorMsg, err)
+		}
 		return nil, fmt.Errorf("failed to perform HTTP request: %w", err)
 	}
 
