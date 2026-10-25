@@ -18,5 +18,5 @@ resource "railway_variable" "hub_app_python_handler_url" {
 
 import {
   to = railway_variable.hub_app_sentry_dsn
-  id = "${var.hub_app_service_id}/${var.railway_environment_id}/SENTRY_DSN"
+  id = "${var.hub_app_service_id}:${var.railway_environment_id}:SENTRY_DSN"
 }

@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: opentofu/setup-opentofu@v1
         with:
-          tofu_version: 1.9.0
+          tofu_version: 1.10.0
       - run: tofu init -input=false
       - run: tofu plan -input=false -no-color
       - run: tofu validate
@@ -58,6 +58,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: opentofu/setup-opentofu@v1
         with:
-          tofu_version: 1.9.0
+          tofu_version: 1.10.0
       - run: tofu init -input=false
       - run: tofu apply -input=false -auto-approve -no-color
