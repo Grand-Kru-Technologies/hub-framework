@@ -18,6 +18,7 @@ spec:
           onError: LogAndFail
           enabled: True
           config:
+            host: http://python-handler:5000
             pathprefix: /apply/exampleTaskPython
             appendRequestPath: false
             clientTimeout: 15

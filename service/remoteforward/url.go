@@ -13,7 +13,7 @@ func JoinForwardURL(host, pathPrefix, requestPath string) string {
 		return base + "/" + trimmedPath
 	}
 	if trimmedPath == "" {
-		return base + strings.TrimSuffix(pathPrefix, "/")
+		return base + pathPrefix
 	}
 	return base + pathPrefix + trimmedPath
 }

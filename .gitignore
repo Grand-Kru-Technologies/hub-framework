@@ -25,10 +25,3 @@ go.work
 
 .idea
 __pycache__/
-
-# OpenTofu / Terraform local state (remote backend is authoritative)
-**/.terraform/
-*.tfstate
-*.tfstate.*
-*.tfstate.backup
-.terraform.lock.hcl.bak

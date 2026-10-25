@@ -10,16 +10,22 @@ variable "sentry_dsn" {
   description = "Sentry DSN for hub-app remote forward error reporting on staging."
 }
 
-variable "python_handler_url" {
+variable "state_encryption_passphrase" {
   type        = string
-  description = "Internal URL hub-app uses to reach python-handler on staging."
-  default     = "http://python-handler.railway.internal:5000"
+  sensitive   = true
+  description = "Passphrase for OpenTofu client-side state/plan encryption (see versions.tf encryption block)."
 }
 
 variable "railway_environment_id" {
   type        = string
   default     = "6fbd88c0-89a3-41ff-a0a5-d38b8beda3b2"
   description = "Railway environment ID for staging."
+}
+
+variable "railway_environment_name" {
+  type        = string
+  default     = "staging"
+  description = "Railway environment name (used in import IDs: service_id:environment_name:VAR_NAME)."
 }
 
 variable "hub_app_service_id" {

@@ -25,6 +25,10 @@ func NewBackoff(config BackoffConfig) *Backoff {
 }
 
 func (b *Backoff) ExecuteWithBackoff(operation func() error) error {
+	if b.config.MaxRetries <= 0 {
+		return operation()
+	}
+
 	delay := b.config.InitialDelay
 
 	var err error

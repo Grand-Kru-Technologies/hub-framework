@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/QueerGlobal/hub-framework/api"
@@ -24,6 +25,10 @@ func (h rootHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/health":
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, "ok")
+		return
+	}
+	if strings.HasPrefix(strings.ToLower(r.URL.Path), "/smokeapp/") && os.Getenv("ENABLE_SMOKE_FORWARD") != "true" {
+		http.NotFound(w, r)
 		return
 	}
 	if h.hub != nil {

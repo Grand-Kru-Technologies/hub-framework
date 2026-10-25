@@ -2,38 +2,37 @@
 
 Declares staging Railway service variables for hub-app:
 
-- `SENTRY_DSN` (optional error reporting for remote forwarders)
-- `PYTHON_HANDLER_URL` (internal python-handler URL)
+- `SENTRY_DSN` (remote forward error reporting)
 
-State is stored in the encrypted S3 backend configured in `versions.tf`.
+State is stored in the S3 backend in `versions.tf` with **SSE-S3** and **OpenTofu client-side encryption** (passphrase via `TF_VAR_state_encryption_passphrase` / `TOFU_STATE_ENCRYPTION_PASSPHRASE` secret).
+
+## Bootstrap
+
+Create the state bucket and GitHub OIDC role once via `infra/opentofu/bootstrap/` (see that README).
 
 ## CI
 
-Pull requests that touch this directory run `tofu plan` via `.github/workflows/staging-opentofu.yml`.
+Pull requests run `tofu plan` and upload a saved plan artifact via `.github/workflows/staging-opentofu.yml`.
 
-Apply runs only from a manual workflow dispatch when the `confirm_apply` input is exactly `apply`.
+Apply runs only on **`main`** through the **`staging-opentofu`** GitHub Environment (required reviewer), applying a **saved plan artifact** from an approved PR plan run (no fresh `-auto-approve` plan on apply).
 
-Required repository secrets for plan/apply:
+Required configuration:
 
-- `RAILWAY_TOKEN`
-- `STAGING_SENTRY_DSN`
-- `TOFU_STATE_AWS_ACCESS_KEY_ID`
-- `TOFU_STATE_AWS_SECRET_ACCESS_KEY`
-
-The state bucket `qg-hub-staging-tofu-state` must exist with encryption enabled before the first init.
+- Secrets: `RAILWAY_TOKEN`, `STAGING_SENTRY_DSN`, `TOFU_STATE_ENCRYPTION_PASSPHRASE`
+- Variable: `TOFU_STATE_AWS_ROLE_ARN` (from bootstrap output)
 
 ## Import existing SENTRY_DSN
 
-`main.tf` includes an import block for an existing `SENTRY_DSN` variable. If Railway uses a different import id format, adjust the import `id` after `tofu plan` reports the expected value.
+Import id format: `service_id:environment_name:VAR_NAME` (e.g. `…:staging:SENTRY_DSN`).
 
 ## Local apply (operators only)
 
 ```sh
 cd infra/opentofu/staging
 export TF_VAR_railway_token="$RAILWAY_TOKEN"
-export TF_VAR_sentry_dsn="$SENTRY_DSN"
-export AWS_ACCESS_KEY_ID=...
-export AWS_SECRET_ACCESS_KEY=...
+export TF_VAR_sentry_dsn="$STAGING_SENTRY_DSN"
+export TF_VAR_state_encryption_passphrase="$TOFU_STATE_ENCRYPTION_PASSPHRASE"
+# AWS via OIDC or operator role with S3 access to the state bucket
 tofu init
 tofu plan
 tofu apply

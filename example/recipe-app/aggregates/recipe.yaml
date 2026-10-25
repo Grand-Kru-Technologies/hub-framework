@@ -27,6 +27,7 @@ spec:
           mustFinish: true
           onError: Log
           config:
+            host: "http://search-service:8080"
             serviceName: "recipe"
             key: headers.SearchKey
         - name: ResponseBodyLogger

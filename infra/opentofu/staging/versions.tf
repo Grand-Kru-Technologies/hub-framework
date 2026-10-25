@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.6.0"
+  required_version = ">= 1.10.0"
 
   required_providers {
     railway = {
@@ -14,5 +14,25 @@ terraform {
     region       = "us-east-1"
     encrypt      = true
     use_lockfile = true
+  }
+
+  encryption {
+    key_provider "pbkdf2" "remote" {
+      passphrase = var.state_encryption_passphrase
+    }
+
+    method "aes_gcm" "remote" {
+      keys = key_provider.pbkdf2.remote
+    }
+
+    state {
+      method   = method.aes_gcm.remote
+      enforced = true
+    }
+
+    plan {
+      method   = method.aes_gcm.remote
+      enforced = true
+    }
   }
 }

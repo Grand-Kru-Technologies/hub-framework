@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/QueerGlobal/hub-framework/core/entity"
@@ -21,10 +20,10 @@ type ForwardingService struct {
 	PathPrefix        string
 	appendRequestPath bool
 	name              string
-	backoff    *util.Backoff
-	client     *http.Client
-	log        zerolog.Logger
-	reporter   remoteforward.ErrorReporter
+	backoff           *util.Backoff
+	client            *http.Client
+	log               zerolog.Logger
+	reporter          remoteforward.ErrorReporter
 }
 
 func NewForwardingService(config map[string]interface{}) (entity.Task, error) {
@@ -34,7 +33,7 @@ func NewForwardingService(config map[string]interface{}) (entity.Task, error) {
 		svc.Host = host
 	}
 	if svc.Host == "" {
-		svc.Host = os.Getenv("PYTHON_HANDLER_URL")
+		return nil, fmt.Errorf("HttpService config requires non-empty host")
 	}
 
 	if pathPrefix, ok := config["pathprefix"].(string); ok {
@@ -47,32 +46,54 @@ func NewForwardingService(config map[string]interface{}) (entity.Task, error) {
 	}
 
 	var backoffConfig util.BackoffConfig
+	backoffConfigured := false
 	if backoff, ok := config["backoff"].(map[string]interface{}); ok {
-		if initialDelay, ok := backoff["initialDelay"].(float64); ok {
-			backoffConfig.InitialDelay = time.Duration(initialDelay) * time.Second
+		backoffConfigured = true
+		if raw, ok := backoff["initialDelay"]; ok {
+			if n, ok := remoteforward.CoerceInt(raw); ok {
+				backoffConfig.InitialDelay = time.Duration(n) * time.Second
+			} else if f, ok := raw.(float64); ok {
+				backoffConfig.InitialDelay = time.Duration(f) * time.Second
+			}
 		}
-		if maxDelay, ok := backoff["maxDelay"].(float64); ok {
-			backoffConfig.MaxDelay = time.Duration(maxDelay) * time.Second
+		if raw, ok := backoff["maxDelay"]; ok {
+			if n, ok := remoteforward.CoerceInt(raw); ok {
+				backoffConfig.MaxDelay = time.Duration(n) * time.Second
+			} else if f, ok := raw.(float64); ok {
+				backoffConfig.MaxDelay = time.Duration(f) * time.Second
+			}
 		}
-		if multiplier, ok := backoff["multiplier"].(float64); ok {
-			backoffConfig.Multiplier = multiplier
+		if raw, ok := backoff["multiplier"]; ok {
+			if n, ok := remoteforward.CoerceInt(raw); ok {
+				backoffConfig.Multiplier = float64(n)
+			} else if f, ok := raw.(float64); ok {
+				backoffConfig.Multiplier = f
+			}
 		}
-		if maxRetries, ok := backoff["maxRetries"].(float64); ok {
-			backoffConfig.MaxRetries = int(maxRetries)
+		if raw, ok := backoff["maxRetries"]; ok {
+			if n, ok := remoteforward.CoerceInt(raw); ok {
+				backoffConfig.MaxRetries = n
+			}
 		}
 	}
 
-	if backoffConfig.MaxRetries <= 0 {
-		backoffConfig.MaxRetries = 3
-	}
-	if backoffConfig.InitialDelay <= 0 {
-		backoffConfig.InitialDelay = 500 * time.Millisecond
-	}
-	if backoffConfig.MaxDelay <= 0 {
-		backoffConfig.MaxDelay = 5 * time.Second
-	}
-	if backoffConfig.Multiplier <= 0 {
-		backoffConfig.Multiplier = 2
+	if !backoffConfigured {
+		backoffConfig = util.BackoffConfig{
+			InitialDelay: 500 * time.Millisecond,
+			MaxDelay:     5 * time.Second,
+			Multiplier:   2,
+			MaxRetries:   3,
+		}
+	} else {
+		if backoffConfig.InitialDelay <= 0 {
+			backoffConfig.InitialDelay = 500 * time.Millisecond
+		}
+		if backoffConfig.MaxDelay <= 0 {
+			backoffConfig.MaxDelay = 5 * time.Second
+		}
+		if backoffConfig.Multiplier <= 0 {
+			backoffConfig.Multiplier = 2
+		}
 	}
 
 	backoff := util.NewBackoff(backoffConfig)
@@ -133,6 +154,7 @@ func (fs *ForwardingService) forwardRequest(ctx context.Context, request entity.
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+	remoteforward.ApplyForwardHeaders(req, request)
 
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
 

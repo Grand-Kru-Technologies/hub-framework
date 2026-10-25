@@ -41,19 +41,10 @@ func BaseServiceOptions(clientTimeout time.Duration, logger *zerolog.Logger, com
 func ServiceOptionsFromMap(config map[string]interface{}, component string) ServiceOptions {
 	opts := BaseServiceOptions(0, nil, component)
 	if raw, ok := config["clientTimeout"]; ok {
-		switch v := raw.(type) {
-		case float64:
-			if v > 0 {
-				opts.ClientTimeout = time.Duration(v * float64(time.Second))
-			}
-		case int:
-			if v > 0 {
-				opts.ClientTimeout = time.Duration(v) * time.Second
-			}
-		case int64:
-			if v > 0 {
-				opts.ClientTimeout = time.Duration(v) * time.Second
-			}
+		if d, ok := CoercePositiveSeconds(raw); ok {
+			opts.ClientTimeout = d
+		} else if f, ok := raw.(float64); ok && f > 0 {
+			opts.ClientTimeout = time.Duration(f * float64(time.Second))
 		}
 	}
 	opts.Reporter = NewErrorReporter(ResolveSentryDSN(config))

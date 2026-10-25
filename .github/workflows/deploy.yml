@@ -70,13 +70,8 @@ jobs:
     needs: railway
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
       - run: curl -fsS --retry 30 --retry-delay 10 --retry-all-errors "$HUB_URL/health"
       - run: curl -fsS "$HUB_URL/" | grep -q "Welcome to exampleApp"
-      - name: hub forwards to exampleTaskPython
-        env:
-          HUB_URL: ${{ env.HUB_URL }}
-        run: bash scripts/smoke-hub-python-forward.sh
 
   tag-release:
     name: tag successful staging deploy

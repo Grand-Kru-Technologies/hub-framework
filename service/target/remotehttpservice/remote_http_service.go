@@ -104,6 +104,7 @@ func (fs *ForwardingService) forwardRequest(request entity.ServiceRequest) (*htt
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+	remoteforward.ApplyForwardHeaders(req, request)
 
 	resp, err := fs.client.Do(req)
 	if err != nil {
