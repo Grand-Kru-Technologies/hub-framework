@@ -236,8 +236,11 @@ prepare_github_setup_tfvars() {
     log "Bootstrap outputs are missing. Run bootstrap plan, then bootstrap apply, before github-setup."
     exit 1
   fi
-  export TF_VAR_tofu_plan_role_arn="$(bootstrap_plan_role_arn)"
-  export TF_VAR_tofu_apply_role_arn="$(bootstrap_apply_role_arn)"
+  local plan_role apply_role
+  plan_role="$(bootstrap_plan_role_arn)"
+  apply_role="$(bootstrap_apply_role_arn)"
+  export TF_VAR_tofu_plan_role_arn="$plan_role"
+  export TF_VAR_tofu_apply_role_arn="$apply_role"
 }
 
 github_setup_plan() {
