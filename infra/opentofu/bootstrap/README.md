@@ -1,13 +1,15 @@
-# OpenTofu bootstrap (remote state bucket + GitHub OIDC)
+# Bootstrap (AWS remote state and OIDC roles)
 
-One-time (or rare) stack that creates:
+One-time stack that provisions:
 
-- Encrypted, versioned S3 bucket `qg-hub-staging-tofu-state` (SSE-S3)
-- GitHub Actions OIDC IAM role with read/write access to that bucket
+- Versioned S3 bucket with SSE-S3, TLS-only bucket policy, lifecycle on noncurrent versions, and `prevent_destroy`
+- Read-only IAM role for plan jobs (prefix `hub-framework/staging/` only)
+- Write IAM role trusted only from the `staging-opentofu` environment on `main`
+- Random client-side state encryption passphrase (sensitive output)
 
-Uses a **local** backend (`terraform.tfstate` in this directory). Operators apply with administrative AWS credentials; CI never uses long-lived AWS access keys for the staging stack.
+Uses the existing account GitHub OIDC provider (`data.aws_iam_openid_connect_provider`). If that provider is missing, create it once in AWS (thumbprint is the 40-character SHA-1 fingerprint for `token.actions.githubusercontent.com`) before running this stack.
 
-After apply, set repository variable **`TOFU_STATE_AWS_ROLE_ARN`** to the `github_tofu_state_role_arn` output.
+Local backend only. Apply with administrative AWS credentials.
 
 ```sh
 cd infra/opentofu/bootstrap
@@ -16,4 +18,4 @@ tofu plan
 tofu apply
 ```
 
-Then configure GitHub Environment **`staging-opentofu`** with required reviewers before using the apply job in `.github/workflows/staging-opentofu.yml`.
+Then run the GitHub setup stack in `../github-setup/` (not applied from CI) to create environments, repository variables, and the encryption secret.

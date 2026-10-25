@@ -1,7 +1,7 @@
 variable "aws_region" {
   type        = string
   default     = "us-east-1"
-  description = "AWS region for the remote state bucket and IAM role."
+  description = "AWS region for the remote state bucket and IAM roles."
 }
 
 variable "state_bucket_name" {
@@ -13,17 +13,29 @@ variable "state_bucket_name" {
 variable "github_repository" {
   type        = string
   default     = "gk-queer-global/hub-framework"
-  description = "GitHub repository allowed to assume the OpenTofu state role (org/repo)."
+  description = "GitHub repository allowed to assume the OpenTofu state roles (org/repo)."
 }
 
-variable "github_oidc_thumbprint" {
+variable "github_plan_environment_name" {
   type        = string
-  default     = "6938fd4d98bab03fa76833955d3977e6238c545d95269e4827dfeec8c568503a"
-  description = "Thumbprint for token.actions.githubusercontent.com (rotate if GitHub rotates their cert)."
+  default     = "staging-opentofu-plan"
+  description = "GitHub Environment name used by read-only plan jobs."
 }
 
-variable "tofu_state_role_name" {
+variable "github_apply_environment_name" {
   type        = string
-  default     = "hub-framework-staging-tofu-state"
-  description = "IAM role name assumed by GitHub Actions for staging OpenTofu."
+  default     = "staging-opentofu"
+  description = "GitHub Environment name used by apply jobs on main."
+}
+
+variable "tofu_plan_role_name" {
+  type        = string
+  default     = "hub-framework-staging-tofu-plan"
+  description = "IAM role name for read-only plan access."
+}
+
+variable "tofu_apply_role_name" {
+  type        = string
+  default     = "hub-framework-staging-tofu-apply"
+  description = "IAM role name for apply access."
 }

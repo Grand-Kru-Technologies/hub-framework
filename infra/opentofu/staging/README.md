@@ -4,26 +4,26 @@ Declares staging Railway service variables for hub-app:
 
 - `SENTRY_DSN` (remote forward error reporting)
 
-State is stored in the S3 backend in `versions.tf` with **SSE-S3** and **OpenTofu client-side encryption** (passphrase via `TF_VAR_state_encryption_passphrase` / `TOFU_STATE_ENCRYPTION_PASSPHRASE` secret).
+State uses the S3 backend in `versions.tf` with SSE-S3 and client-side encryption (passphrase via environment secret `TOFU_STATE_ENCRYPTION_PASSPHRASE`).
 
-## Bootstrap
+## Bootstrap and GitHub setup
 
-Create the state bucket and GitHub OIDC role once via `infra/opentofu/bootstrap/` (see that README).
+1. Apply `infra/opentofu/bootstrap/` once with admin AWS credentials.
+2. Apply `infra/opentofu/github-setup/` once with an admin GitHub token (not run from CI).
 
 ## CI
 
-Pull requests run `tofu plan` and upload a saved plan artifact via `.github/workflows/staging-opentofu.yml`.
+Pull requests and `main` pushes run `tofu plan` under environment `staging-opentofu-plan` and upload `staging-tofu-plan`.
 
-Apply runs only on **`main`** through the **`staging-opentofu`** GitHub Environment (required reviewer), applying a **saved plan artifact** from an approved PR plan run (no fresh `-auto-approve` plan on apply).
+Apply runs only on `main` through environment `staging-opentofu`, after verifying the plan run commit is on `main`, using the saved plan artifact.
 
-Required configuration:
+Repository secrets still required manually: `RAILWAY_TOKEN`, `STAGING_SENTRY_DSN`.
 
-- Secrets: `RAILWAY_TOKEN`, `STAGING_SENTRY_DSN`, `TOFU_STATE_ENCRYPTION_PASSPHRASE`
-- Variable: `TOFU_STATE_AWS_ROLE_ARN` (from bootstrap output)
+Variables from GitHub setup: `TOFU_STATE_AWS_PLAN_ROLE_ARN`, `TOFU_STATE_AWS_APPLY_ROLE_ARN`.
 
 ## Import existing SENTRY_DSN
 
-Import id format: `service_id:environment_name:VAR_NAME` (e.g. `…:staging:SENTRY_DSN`).
+Import id format: `service_id:environment_name:VAR_NAME` (example suffix `:staging:SENTRY_DSN`).
 
 ## Local apply (operators only)
 
@@ -32,7 +32,6 @@ cd infra/opentofu/staging
 export TF_VAR_railway_token="$RAILWAY_TOKEN"
 export TF_VAR_sentry_dsn="$STAGING_SENTRY_DSN"
 export TF_VAR_state_encryption_passphrase="$TOFU_STATE_ENCRYPTION_PASSPHRASE"
-# AWS via OIDC or operator role with S3 access to the state bucket
 tofu init
 tofu plan
 tofu apply
