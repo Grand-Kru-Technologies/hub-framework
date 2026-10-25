@@ -2,7 +2,6 @@ package util
 
 import (
 	"fmt"
-	"github.com/pkg/errors"
 	"math/rand"
 	"strings"
 	"time"
@@ -48,9 +47,11 @@ func (b *Backoff) ExecuteWithBackoff(operation func() error) error {
 		if delay > b.config.MaxDelay {
 			delay = b.config.MaxDelay
 		}
-		jitter := time.Duration(rand.Int63n(int64(delay / 2)))
-		delay += jitter
+		if half := int64(delay / 2); half > 0 {
+			jitter := time.Duration(rand.Int63n(half))
+			delay += jitter
+		}
 	}
 
-	return errors.Wrap(err, "all retry attempts failed")
+	return fmt.Errorf("%w: %w", ErrAllRetriesFailed, err)
 }

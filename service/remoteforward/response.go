@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/QueerGlobal/hub-framework/core/entity"
 	"github.com/QueerGlobal/hub-framework/util"
@@ -21,7 +20,7 @@ const (
 	statusClassServerError
 )
 
-var statusClassHandlers = map[httpStatusClass]func(int, []byte, zerolog.Logger) (*entity.HttpServiceResponse, error){
+var statusClassHandlers = map[httpStatusClass]func(int, []byte, zerolog.Logger) error{
 	statusClassSuccess:     handleSuccessResponse,
 	statusClassClientError: handleClientErrorResponse,
 	statusClassServerError: handleServerErrorResponse,
@@ -50,23 +49,15 @@ func ReadAndParseResponse(resp *http.Response, log zerolog.Logger) (*entity.Http
 		return nil, wrapped
 	}
 
-	handler, ok := statusClassHandlers[classifyHTTPStatus(resp.StatusCode)]
-	if !ok {
-		return nil, fmt.Errorf("unexpected status class for code %d", resp.StatusCode)
-	}
-
-	parsed, err := handler(resp.StatusCode, body, log)
-	if err != nil {
+	handler := statusClassHandlers[classifyHTTPStatus(resp.StatusCode)]
+	if err := handler(resp.StatusCode, body, log); err != nil {
 		return nil, err
 	}
 
-	return attachHTTPMeta(resp, parsed, body), nil
+	return buildHTTPServiceResponse(resp, body), nil
 }
 
-func attachHTTPMeta(resp *http.Response, parsed *entity.HttpServiceResponse, body []byte) *entity.HttpServiceResponse {
-	if parsed != nil {
-		return parsed
-	}
+func buildHTTPServiceResponse(resp *http.Response, body []byte) *entity.HttpServiceResponse {
 	return &entity.HttpServiceResponse{
 		ResponseMeta: &entity.HttpResponseMeta{
 			OriginalResponse: resp,
@@ -83,14 +74,14 @@ func attachHTTPMeta(resp *http.Response, parsed *entity.HttpServiceResponse, bod
 	}
 }
 
-func handleSuccessResponse(statusCode int, body []byte, log zerolog.Logger) (*entity.HttpServiceResponse, error) {
+func handleSuccessResponse(statusCode int, body []byte, log zerolog.Logger) error {
 	trimmed := bytes.TrimSpace(body)
 	if len(trimmed) == 0 {
 		log.Info().
 			Int("status_code", statusCode).
 			Str("stage", "parse_success_body").
 			Msg("remote forward empty success body")
-		return nil, nil
+		return nil
 	}
 
 	if !json.Valid(trimmed) {
@@ -101,19 +92,7 @@ func handleSuccessResponse(statusCode int, body []byte, log zerolog.Logger) (*en
 			Int("body_bytes", len(body)).
 			Str("stage", "parse_success_body").
 			Msg("remote forward malformed JSON")
-		return nil, err
-	}
-
-	var payload interface{}
-	if err := json.Unmarshal(trimmed, &payload); err != nil {
-		err = fmt.Errorf("%s: %w", util.UnrecoverableErrorMsg, ErrMalformedJSON)
-		log.Error().
-			Err(err).
-			Int("status_code", statusCode).
-			Int("body_bytes", len(body)).
-			Str("stage", "parse_success_body").
-			Msg("remote forward malformed JSON")
-		return nil, err
+		return err
 	}
 
 	log.Info().
@@ -121,15 +100,15 @@ func handleSuccessResponse(statusCode int, body []byte, log zerolog.Logger) (*en
 		Int("body_bytes", len(body)).
 		Str("stage", "parse_success_body").
 		Msg("remote forward JSON success")
-	return nil, nil
+	return nil
 }
 
-func handleClientErrorResponse(statusCode int, body []byte, log zerolog.Logger) (*entity.HttpServiceResponse, error) {
-	return nil, wrapUpstreamError(statusCode, body, log, true)
+func handleClientErrorResponse(statusCode int, body []byte, log zerolog.Logger) error {
+	return wrapUpstreamError(statusCode, body, log, true)
 }
 
-func handleServerErrorResponse(statusCode int, body []byte, log zerolog.Logger) (*entity.HttpServiceResponse, error) {
-	return nil, wrapUpstreamError(statusCode, body, log, false)
+func handleServerErrorResponse(statusCode int, body []byte, log zerolog.Logger) error {
+	return wrapUpstreamError(statusCode, body, log, false)
 }
 
 func wrapUpstreamError(statusCode int, body []byte, log zerolog.Logger, unrecoverable bool) error {
@@ -169,17 +148,4 @@ func logUpstreamError(cause error, statusCode, bodyBytes int, log zerolog.Logger
 		event.Msg("remote forward upstream error")
 	}
 	return err
-}
-
-// ReportIfExhausted invokes report when retries are exhausted for a retryable failure.
-func ReportIfExhausted(err error, report ErrorReporter) {
-	if err == nil || report == nil {
-		return
-	}
-	if strings.Contains(err.Error(), util.UnrecoverableErrorMsg) {
-		return
-	}
-	if strings.Contains(err.Error(), "all retry attempts failed") {
-		report.ReportError(err, "forward_exhausted")
-	}
 }

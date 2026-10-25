@@ -61,6 +61,12 @@ jobs:
         run: curl -fsS --retry 10 --retry-delay 3 --retry-all-errors http://localhost:8080/health
       - name: python-handler /health lists exampleTaskPython
         run: curl -fsS http://localhost:5000/health | tee /dev/stderr | grep -q exampleTaskPython
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: remote forward integration (stub upstream)
+        run: go test -count=1 ./service/remoteforward/... -run TestForwardIntegration
       - if: always()
         run: docker compose logs
       - if: always()

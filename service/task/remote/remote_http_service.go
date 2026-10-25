@@ -4,14 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/QueerGlobal/hub-framework/core/entity"
-	"github.com/QueerGlobal/hub-framework/service/logging"
 	"github.com/QueerGlobal/hub-framework/service/remoteforward"
 	"github.com/QueerGlobal/hub-framework/util"
 	"github.com/rs/zerolog"
@@ -37,7 +34,7 @@ func NewForwardingService(config map[string]interface{}) (entity.Task, error) {
 	}
 
 	if pathPrefix, ok := config["pathprefix"].(string); ok {
-		svc.PathPrefix = normalizePathPrefix(pathPrefix)
+		svc.PathPrefix = remoteforward.NormalizePathPrefix(pathPrefix)
 	}
 
 	var backoffConfig util.BackoffConfig
@@ -59,29 +56,12 @@ func NewForwardingService(config map[string]interface{}) (entity.Task, error) {
 	backoff := util.NewBackoff(backoffConfig)
 	svc.backoff = backoff
 
-	timeout := 30 * time.Second
-	if rawTimeout, ok := config["clientTimeout"].(float64); ok && rawTimeout > 0 {
-		timeout = time.Duration(rawTimeout) * time.Second
-	}
-	svc.client = &http.Client{Timeout: timeout}
-
-	svc.log = logging.GetLogger().With().Str("component", "remote_task_forwarder").Logger()
-	svc.reporter = remoteforward.NoopErrorReporter()
+	opts := remoteforward.ServiceOptionsFromMap(config, "remote_task_forwarder")
+	svc.client = &http.Client{Timeout: opts.ClientTimeout}
+	svc.log = opts.Logger
+	svc.reporter = opts.Reporter
 
 	return &svc, nil
-}
-
-func normalizePathPrefix(pathPrefix string) string {
-	if len(pathPrefix) == 0 {
-		return pathPrefix
-	}
-	if !strings.HasPrefix(pathPrefix, "/") {
-		pathPrefix = "/" + pathPrefix
-	}
-	if !strings.HasSuffix(pathPrefix, "/") {
-		pathPrefix = pathPrefix + "/"
-	}
-	return pathPrefix
 }
 
 func (fs *ForwardingService) Apply(ctx context.Context, request entity.ServiceRequest) error {
@@ -101,6 +81,7 @@ func (fs *ForwardingService) Apply(ctx context.Context, request entity.ServiceRe
 	})
 	if err != nil {
 		remoteforward.ReportIfExhausted(err, fs.reporter)
+		fs.log.Error().Err(err).Str("stage", "forward_apply").Msg("remote task forward failed")
 		return err
 	}
 
@@ -135,9 +116,12 @@ func (fs *ForwardingService) forwardRequest(ctx context.Context, request entity.
 
 	resp, err := fs.client.Do(req)
 	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return nil, fmt.Errorf("%s: %w", util.UnrecoverableErrorMsg, err)
+		if ctx.Err() != nil {
+			wrapped := fmt.Errorf("%s: %w", util.UnrecoverableErrorMsg, ctx.Err())
+			fs.log.Warn().Err(wrapped).Str("stage", "http_do").Msg("remote task forward cancelled")
+			return nil, wrapped
 		}
+		fs.log.Warn().Err(err).Str("stage", "http_do").Msg("remote task forward HTTP request failed")
 		return nil, fmt.Errorf("failed to perform HTTP request: %w", err)
 	}
 

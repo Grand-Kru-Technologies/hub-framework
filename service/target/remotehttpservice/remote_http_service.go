@@ -5,11 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/QueerGlobal/hub-framework/core/entity"
-	"github.com/QueerGlobal/hub-framework/service/logging"
 	"github.com/QueerGlobal/hub-framework/service/remoteforward"
 	"github.com/QueerGlobal/hub-framework/util"
 	"github.com/rs/zerolog"
@@ -31,6 +29,7 @@ type ForwardingServiceConfig struct {
 	ClientTimeout time.Duration
 	Logger        *zerolog.Logger
 	Reporter      remoteforward.ErrorReporter
+	SentryDSN     string
 }
 
 func NewForwardingService(config interface{}) ForwardingService {
@@ -39,7 +38,7 @@ func NewForwardingService(config interface{}) ForwardingService {
 	cfg := config.(ForwardingServiceConfig)
 
 	svc.Host = cfg.Host
-	svc.PathPrefix = normalizePathPrefix(cfg.PathPrefix)
+	svc.PathPrefix = remoteforward.NormalizePathPrefix(cfg.PathPrefix)
 
 	backoff := util.NewBackoff(cfg.BackoffConfig)
 	svc.backoff = backoff
@@ -53,29 +52,21 @@ func NewForwardingService(config interface{}) ForwardingService {
 	if cfg.Logger != nil {
 		svc.log = *cfg.Logger
 	} else {
-		svc.log = logging.GetLogger().With().Str("component", "remote_target_forwarder").Logger()
+		opts := remoteforward.ServiceOptionsFromMap(nil, "remote_target_forwarder")
+		svc.log = opts.Logger
 	}
 
 	if cfg.Reporter != nil {
 		svc.reporter = cfg.Reporter
 	} else {
-		svc.reporter = remoteforward.NoopErrorReporter()
+		dsn := cfg.SentryDSN
+		if dsn == "" {
+			dsn = remoteforward.ResolveSentryDSN(nil)
+		}
+		svc.reporter = remoteforward.NewErrorReporter(dsn)
 	}
 
 	return svc
-}
-
-func normalizePathPrefix(pathPrefix string) string {
-	if len(pathPrefix) == 0 {
-		return pathPrefix
-	}
-	if !strings.HasPrefix(pathPrefix, "/") {
-		pathPrefix = "/" + pathPrefix
-	}
-	if !strings.HasSuffix(pathPrefix, "/") {
-		pathPrefix = pathPrefix + "/"
-	}
-	return pathPrefix
 }
 
 func (fs *ForwardingService) Apply(request entity.ServiceRequest) (entity.ServiceResponse, error) {
@@ -97,6 +88,7 @@ func (fs *ForwardingService) Apply(request entity.ServiceRequest) (entity.Servic
 	})
 	if err != nil {
 		remoteforward.ReportIfExhausted(err, fs.reporter)
+		fs.log.Error().Err(err).Str("stage", "forward_apply").Msg("remote target forward failed")
 		return nil, err
 	}
 
@@ -125,6 +117,7 @@ func (fs *ForwardingService) forwardRequest(request entity.ServiceRequest) (*htt
 
 	resp, err := fs.client.Do(req)
 	if err != nil {
+		fs.log.Warn().Err(err).Str("stage", "http_do").Msg("remote target forward HTTP request failed")
 		return nil, fmt.Errorf("failed to perform HTTP request: %w", err)
 	}
 
