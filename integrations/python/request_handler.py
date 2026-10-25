@@ -6,6 +6,14 @@ import jsonschema
 from jsonschema import RefResolver
 import os
 
+def _normalize_handler_result(result):
+    if not isinstance(result, dict):
+        return
+    body = result.get('body')
+    if isinstance(body, (bytes, bytearray)):
+        result['body'] = body.decode('utf-8')
+
+
 def create_app(handlers):
     app = Flask(__name__)
 
