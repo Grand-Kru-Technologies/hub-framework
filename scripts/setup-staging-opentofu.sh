@@ -1,25 +1,10 @@
 #!/usr/bin/env bash
 # Library-style OpenTofu staging setup (bootstrap + github-setup).
-# Secrets: use Doppler (doppler run -- ./scripts/setup-staging-opentofu.sh ...) or --doppler-project/--doppler-config.
-# Never prints secret values.
+# Prefer: doppler run --project hub-framework --config staging -- ./scripts/setup-staging-opentofu.sh ...
 #
-# Usage:
-#   setup-staging-opentofu.sh [options] <command>
-#
-# Commands:
-#   oidc ensure
-#   bootstrap plan | apply
-#   github-setup plan | apply
-#   all plan | apply
-#
-# Options:
-#   --doppler-project NAME   default: hub-framework
-#   --doppler-config NAME      default: staging
-#   --repo-root PATH           default: repository root (parent of scripts/)
-#   --baseline-tag-commit SHA  default: 1583326b
-#   --push-baseline-tag        after all apply, push hub-framework-staging-baseline if missing
-#   --yes                      skip interactive apply confirmation (unsafe)
-#   --dry-run                  validate CLI and arguments only
+# First-time flow (four steps):
+#   bootstrap plan -> bootstrap apply -> github-setup plan -> github-setup apply
+# Or one shot:  all setup
 #
 set -euo pipefail
 
@@ -47,22 +32,23 @@ usage() {
 usage: $(basename "$0") [options] <command>
 
 Commands:
-  oidc ensure                 Ensure GitHub OIDC provider exists in AWS
-  bootstrap plan              Plan bootstrap stack (infra/opentofu/bootstrap)
-  bootstrap apply             Apply saved bootstrap plan (bootstrap/tfplan)
-  github-setup plan           Plan github-setup (requires bootstrap applied)
-  github-setup apply          Apply saved github-setup plan
-  all plan                    bootstrap plan then github-setup plan
-  all apply                   bootstrap apply then github-setup apply
+  oidc ensure                   Ensure GitHub OIDC provider exists in AWS
+  bootstrap plan                Plan bootstrap (no AWS changes)
+  bootstrap apply               Apply bootstrap plan (creates OIDC if missing)
+  github-setup plan             Plan github-setup (bootstrap must be applied)
+  github-setup apply            Apply github-setup plan
+  all plan                      Bootstrap plan only (then run bootstrap apply)
+  all apply                     Bootstrap apply then github-setup apply (both tfplans required)
+  all setup                     Full flow: bootstrap plan/apply then github-setup plan/apply
 
 Options:
-  --doppler-project NAME      Doppler project (default: ${DEFAULT_DOPPLER_PROJECT})
-  --doppler-config NAME       Doppler config (default: ${DEFAULT_DOPPLER_CONFIG})
-  --repo-root PATH            Repository root
-  --baseline-tag-commit SHA   Commit for baseline tag (default: ${DEFAULT_BASELINE_COMMIT})
-  --push-baseline-tag         Push ${DEFAULT_BASELINE_TAG} when absent on origin
-  --yes                       Apply without typing yes (unsafe)
-  --dry-run                   Validate options and Doppler CLI only
+  --doppler-project NAME
+  --doppler-config NAME
+  --repo-root PATH
+  --baseline-tag-commit SHA
+  --push-baseline-tag           Only valid with all apply or all setup
+  --yes                         Skip apply confirmation (unsafe)
+  --dry-run
   -h, --help
 EOF
   exit 64
@@ -74,28 +60,45 @@ doppler_cli() {
   doppler "$@" --project "$DOPPLER_PROJECT" --config "$DOPPLER_CONFIG"
 }
 
-doppler_secret_exists() {
-  local name=$1
-  doppler_cli secrets get "$name" --plain >/dev/null 2>&1
+doppler_secret_not_found() {
+  local err_file=$1
+  grep -qiE 'not found|could not find|does not exist|404|not exist' "$err_file"
 }
 
+# Returns 0 and prints value; 1 if secret missing; 2 on other Doppler errors (message on stderr).
 doppler_secret_get() {
   local name=$1
-  doppler_cli secrets get "$name" --plain
+  local err out
+  err="$(mktemp)"
+  trap 'rm -f "$err"' RETURN
+  if out="$(doppler_cli secrets get "$name" --plain 2>"$err")"; then
+    printf '%s' "$out"
+    return 0
+  fi
+  if doppler_secret_not_found "$err"; then
+    return 1
+  fi
+  cat "$err" >&2
+  log "Doppler error while reading ${name}; not generating a new value"
+  return 2
 }
 
 doppler_secret_set() {
   local name=$1 value=$2
-  printf '%s' "$value" | doppler_cli secrets set "$name" --stdin --no-interactive >/dev/null
+  printf '%s' "$value" | doppler_cli secrets set "$name" --silent
 }
 
 ensure_doppler_secret() {
   local name=$1 generator=$2
-  if doppler_secret_exists "$name"; then
-    doppler_secret_get "$name"
+  local value rc=0
+  value="$(doppler_secret_get "$name")" || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    printf '%s' "$value"
     return 0
   fi
-  local value
+  if [ "$rc" -eq 2 ]; then
+    exit 1
+  fi
   value="$("$generator")"
   doppler_secret_set "$name" "$value"
   printf '%s' "$value"
@@ -114,11 +117,22 @@ load_staging_state_passphrase() {
 }
 
 load_github_admin_token() {
-  if ! doppler_secret_exists "$SECRET_GITHUB_ADMIN"; then
+  local value rc=0
+  value="$(doppler_secret_get "$SECRET_GITHUB_ADMIN")" || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    printf '%s' "$value"
+    return 0
+  fi
+  if [ "$rc" -eq 1 ]; then
     log "Doppler secret ${SECRET_GITHUB_ADMIN} is required for github-setup"
     exit 1
   fi
-  doppler_secret_get "$SECRET_GITHUB_ADMIN"
+  exit 1
+}
+
+export_local_state_passphrase() {
+  TF_VAR_local_state_encryption_passphrase="$(load_local_state_passphrase)"
+  export TF_VAR_local_state_encryption_passphrase
 }
 
 ensure_github_oidc_provider() {
@@ -156,8 +170,7 @@ tofu_init() {
 
 tofu_plan_stack() {
   local dir=$1 out=$2
-  shift 2
-  (cd "$dir" && tofu plan -input=false -no-color -out="$out" "$@")
+  (cd "$dir" && tofu plan -input=false -no-color -out="$out")
 }
 
 tofu_show_plan() {
@@ -174,10 +187,7 @@ bootstrap_dir() { printf '%s/infra/opentofu/bootstrap' "$REPO_ROOT"; }
 github_setup_dir() { printf '%s/infra/opentofu/github-setup' "$REPO_ROOT"; }
 
 bootstrap_plan() {
-  local pass
-  pass="$(load_local_state_passphrase)"
-  export TF_VAR_local_state_encryption_passphrase="$pass"
-  ensure_github_oidc_provider
+  export_local_state_passphrase
   local dir
   dir="$(bootstrap_dir)"
   tofu_init "$dir"
@@ -186,9 +196,8 @@ bootstrap_plan() {
 }
 
 bootstrap_apply() {
-  local pass dir
-  pass="$(load_local_state_passphrase)"
-  export TF_VAR_local_state_encryption_passphrase="$pass"
+  export_local_state_passphrase
+  local dir
   dir="$(bootstrap_dir)"
   if [ ! -f "${dir}/tfplan" ]; then
     log "Missing ${dir}/tfplan; run bootstrap plan first"
@@ -196,30 +205,44 @@ bootstrap_apply() {
   fi
   tofu_show_plan "$dir" tfplan
   confirm_apply bootstrap
+  ensure_github_oidc_provider
   tofu_apply_plan "$dir" tfplan
   log "Bootstrap apply complete"
 }
 
+bootstrap_has_outputs() {
+  export_local_state_passphrase
+  (cd "$(bootstrap_dir)" && tofu output -raw github_tofu_plan_role_arn >/dev/null 2>&1)
+}
+
 bootstrap_plan_role_arn() {
+  export_local_state_passphrase
   (cd "$(bootstrap_dir)" && tofu output -raw github_tofu_plan_role_arn)
 }
 
 bootstrap_apply_role_arn() {
+  export_local_state_passphrase
   (cd "$(bootstrap_dir)" && tofu output -raw github_tofu_apply_role_arn)
 }
 
-github_setup_plan() {
-  local local_pass staging_pass github_token plan_arn apply_arn dir
-  local_pass="$(load_local_state_passphrase)"
+prepare_github_setup_tfvars() {
+  export_local_state_passphrase
+  local staging_pass github_token
   staging_pass="$(load_staging_state_passphrase)"
   github_token="$(load_github_admin_token)"
-  plan_arn="$(bootstrap_plan_role_arn)"
-  apply_arn="$(bootstrap_apply_role_arn)"
-  export TF_VAR_local_state_encryption_passphrase="$local_pass"
   export TF_VAR_state_encryption_passphrase="$staging_pass"
   export TF_VAR_github_token="$github_token"
-  export TF_VAR_tofu_plan_role_arn="$plan_arn"
-  export TF_VAR_tofu_apply_role_arn="$apply_arn"
+  if ! bootstrap_has_outputs; then
+    log "Bootstrap outputs are missing. Run bootstrap plan, then bootstrap apply, before github-setup."
+    exit 1
+  fi
+  export TF_VAR_tofu_plan_role_arn="$(bootstrap_plan_role_arn)"
+  export TF_VAR_tofu_apply_role_arn="$(bootstrap_apply_role_arn)"
+}
+
+github_setup_plan() {
+  prepare_github_setup_tfvars
+  local dir
   dir="$(github_setup_dir)"
   tofu_init "$dir"
   tofu_plan_stack "$dir" tfplan
@@ -227,17 +250,8 @@ github_setup_plan() {
 }
 
 github_setup_apply() {
-  local local_pass staging_pass github_token plan_arn apply_arn dir
-  local_pass="$(load_local_state_passphrase)"
-  staging_pass="$(load_staging_state_passphrase)"
-  github_token="$(load_github_admin_token)"
-  plan_arn="$(bootstrap_plan_role_arn)"
-  apply_arn="$(bootstrap_apply_role_arn)"
-  export TF_VAR_local_state_encryption_passphrase="$local_pass"
-  export TF_VAR_state_encryption_passphrase="$staging_pass"
-  export TF_VAR_github_token="$github_token"
-  export TF_VAR_tofu_plan_role_arn="$plan_arn"
-  export TF_VAR_tofu_apply_role_arn="$apply_arn"
+  prepare_github_setup_tfvars
+  local dir
   dir="$(github_setup_dir)"
   if [ ! -f "${dir}/tfplan" ]; then
     log "Missing ${dir}/tfplan; run github-setup plan first"
@@ -247,6 +261,13 @@ github_setup_apply() {
   confirm_apply github-setup
   tofu_apply_plan "$dir" tfplan
   log "GitHub setup apply complete"
+  print_post_setup_reminder
+}
+
+print_post_setup_reminder() {
+  log "Setup complete."
+  log "Revoke the fine-grained GitHub admin token: remove ${SECRET_GITHUB_ADMIN} from Doppler and revoke the token in GitHub settings."
+  log "Use a repo-scoped token with minimal permissions (administration, environments, secrets, variables) and short expiry when re-running setup."
 }
 
 maybe_push_baseline_tag() {
@@ -259,6 +280,39 @@ maybe_push_baseline_tag() {
     -m "Pre remote-forward-fix baseline (main ${BASELINE_TAG_COMMIT})" "$BASELINE_TAG_COMMIT"
   git -C "$REPO_ROOT" push origin "$DEFAULT_BASELINE_TAG"
   log "Pushed ${DEFAULT_BASELINE_TAG}"
+}
+
+all_plan() {
+  bootstrap_plan
+  log "Bootstrap plan only. Next steps in order:"
+  log "  1) $(basename "$0") bootstrap apply"
+  log "  2) $(basename "$0") github-setup plan"
+  log "  3) $(basename "$0") github-setup apply"
+}
+
+all_apply() {
+  bootstrap_apply
+  github_setup_apply
+  maybe_push_baseline_tag
+}
+
+all_setup() {
+  bootstrap_plan
+  bootstrap_apply
+  github_setup_plan
+  github_setup_apply
+  maybe_push_baseline_tag
+}
+
+validate_push_baseline_flag() {
+  [ "$PUSH_BASELINE_TAG" -eq 0 ] && return 0
+  case "${COMMAND[0]}-${COMMAND[1]:-}" in
+    all-apply|all-setup) return 0 ;;
+    *)
+      log "error: --push-baseline-tag is only valid with 'all apply' or 'all setup'"
+      exit 1
+      ;;
+  esac
 }
 
 parse_global_args() {
@@ -274,7 +328,7 @@ parse_global_args() {
       --dry-run) DRY_RUN=1; shift ;;
       -h|--help) usage ;;
       oidc|bootstrap|github-setup|all) COMMAND+=("$1"); shift ;;
-      plan|apply|ensure) COMMAND+=("$1"); shift ;;
+      plan|apply|ensure|setup) COMMAND+=("$1"); shift ;;
       *) log "unknown argument: $1"; usage ;;
     esac
   done
@@ -288,6 +342,7 @@ main() {
   if [ "${#COMMAND[@]}" -eq 0 ]; then
     usage
   fi
+  validate_push_baseline_flag
 
   if [ "$DRY_RUN" -eq 1 ]; then
     log "dry-run ok (doppler ${DOPPLER_PROJECT}/${DOPPLER_CONFIG}, command: ${COMMAND[*]})"
@@ -303,7 +358,7 @@ main() {
     exit 1
   fi
   if ! command -v aws >/dev/null 2>&1; then
-    log "aws CLI is required for bootstrap"
+    log "aws CLI is required for bootstrap apply"
     exit 1
   fi
   if ! command -v jq >/dev/null 2>&1; then
@@ -332,15 +387,9 @@ main() {
       ;;
     all)
       case "${COMMAND[1]:-}" in
-        plan)
-          bootstrap_plan
-          github_setup_plan
-          ;;
-        apply)
-          bootstrap_apply
-          github_setup_apply
-          maybe_push_baseline_tag
-          ;;
+        plan) all_plan ;;
+        apply) all_apply ;;
+        setup) all_setup ;;
         *) usage ;;
       esac
       ;;
