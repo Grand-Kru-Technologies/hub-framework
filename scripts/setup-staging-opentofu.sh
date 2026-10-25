@@ -32,9 +32,9 @@ usage() {
 usage: $(basename "$0") [options] <command>
 
 Commands:
-  oidc ensure                   Ensure GitHub OIDC provider exists in AWS
-  bootstrap plan                Plan bootstrap (no AWS changes)
-  bootstrap apply               Apply bootstrap plan (creates OIDC if missing)
+  oidc ensure                   Manual fallback: create GitHub OIDC via AWS CLI (confirmed)
+  bootstrap plan                Plan bootstrap (includes OIDC provider when create_github_oidc_provider=true)
+  bootstrap apply               Apply bootstrap plan
   github-setup plan             Plan github-setup (bootstrap must be applied)
   github-setup apply            Apply github-setup plan
   all plan                      Bootstrap plan only (then run bootstrap apply)
@@ -85,7 +85,10 @@ doppler_secret_get() {
 
 doppler_secret_set() {
   local name=$1 value=$2
-  printf '%s' "$value" | doppler_cli secrets set "$name" --silent
+  if ! printf '%s' "$value" | doppler_cli secrets set "$name" --silent >/dev/null; then
+    log "Doppler error while writing ${name}"
+    exit 1
+  fi
 }
 
 ensure_doppler_secret() {
@@ -133,6 +136,12 @@ load_github_admin_token() {
 export_local_state_passphrase() {
   TF_VAR_local_state_encryption_passphrase="$(load_local_state_passphrase)"
   export TF_VAR_local_state_encryption_passphrase
+}
+
+export_bootstrap_tofu_vars() {
+  export_local_state_passphrase
+  TF_VAR_create_github_oidc_provider="${TF_VAR_create_github_oidc_provider:-true}"
+  export TF_VAR_create_github_oidc_provider
 }
 
 ensure_github_oidc_provider() {
@@ -187,7 +196,7 @@ bootstrap_dir() { printf '%s/infra/opentofu/bootstrap' "$REPO_ROOT"; }
 github_setup_dir() { printf '%s/infra/opentofu/github-setup' "$REPO_ROOT"; }
 
 bootstrap_plan() {
-  export_local_state_passphrase
+  export_bootstrap_tofu_vars
   local dir
   dir="$(bootstrap_dir)"
   tofu_init "$dir"
@@ -196,7 +205,7 @@ bootstrap_plan() {
 }
 
 bootstrap_apply() {
-  export_local_state_passphrase
+  export_bootstrap_tofu_vars
   local dir
   dir="$(bootstrap_dir)"
   if [ ! -f "${dir}/tfplan" ]; then
@@ -205,7 +214,6 @@ bootstrap_apply() {
   fi
   tofu_show_plan "$dir" tfplan
   confirm_apply bootstrap
-  ensure_github_oidc_provider
   tofu_apply_plan "$dir" tfplan
   log "Bootstrap apply complete"
 }
@@ -360,10 +368,6 @@ main() {
     log "OpenTofu (tofu) is required"
     exit 1
   fi
-  if ! command -v aws >/dev/null 2>&1; then
-    log "aws CLI is required for bootstrap apply"
-    exit 1
-  fi
   if ! command -v jq >/dev/null 2>&1; then
     log "jq is required"
     exit 1
@@ -372,6 +376,12 @@ main() {
   case "${COMMAND[0]}" in
     oidc)
       [ "${COMMAND[1]:-}" = "ensure" ] || usage
+      if ! command -v aws >/dev/null 2>&1; then
+        log "aws CLI is required for oidc ensure"
+        exit 1
+      fi
+      log "Fallback only: prefer bootstrap OpenTofu (create_github_oidc_provider=true) so OIDC appears in the plan you approve."
+      confirm_apply "GitHub OIDC provider (AWS CLI fallback)"
       ensure_github_oidc_provider
       ;;
     bootstrap)

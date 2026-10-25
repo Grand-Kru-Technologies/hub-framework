@@ -1,9 +1,5 @@
 data "aws_caller_identity" "current" {}
 
-data "aws_iam_openid_connect_provider" "github" {
-  url = "https://token.actions.githubusercontent.com"
-}
-
 resource "aws_s3_bucket" "tofu_state" {
   bucket = var.state_bucket_name
 
@@ -102,7 +98,7 @@ data "aws_iam_policy_document" "github_plan_assume_role" {
     ]
     principals {
       type        = "Federated"
-      identifiers = [data.aws_iam_openid_connect_provider.github.arn]
+      identifiers = [local.github_oidc_provider_arn]
     }
     condition {
       test     = "StringEquals"
@@ -170,7 +166,7 @@ data "aws_iam_policy_document" "github_apply_assume_role" {
     ]
     principals {
       type        = "Federated"
-      identifiers = [data.aws_iam_openid_connect_provider.github.arn]
+      identifiers = [local.github_oidc_provider_arn]
     }
     condition {
       test     = "StringEquals"
@@ -244,6 +240,6 @@ output "aws_account_id" {
 }
 
 output "github_oidc_provider_arn" {
-  value       = data.aws_iam_openid_connect_provider.github.arn
-  description = "Existing GitHub OIDC provider ARN used for trust policies."
+  value       = local.github_oidc_provider_arn
+  description = "GitHub OIDC provider ARN used for IAM trust policies."
 }

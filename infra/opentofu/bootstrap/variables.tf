@@ -51,3 +51,21 @@ variable "local_state_encryption_passphrase" {
   sensitive   = true
   description = "Passphrase for encrypting this stack's local terraform.tfstate (operator-supplied; not the staging remote state secret)."
 }
+
+variable "create_github_oidc_provider" {
+  type        = bool
+  default     = true
+  description = "When true, create the GitHub Actions OIDC provider in this account. When false, look up an existing provider (plan fails if it is missing)."
+}
+
+variable "github_oidc_url" {
+  type        = string
+  default     = "https://token.actions.githubusercontent.com"
+  description = "GitHub Actions OIDC issuer URL."
+}
+
+variable "github_oidc_thumbprint" {
+  type        = string
+  default     = "6938fd4d98bab03fa76916958d6cb6a0a5769a08"
+  description = "SHA-1 thumbprint for the GitHub OIDC TLS certificate (40 hex characters)."
+}

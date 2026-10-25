@@ -1,4 +1,4 @@
-"""Tests for setup-staging-opentofu.sh with stubbed aws, doppler, tofu, git, openssl."""
+"""Tests for setup-staging-opentofu.sh with stubbed doppler, tofu, git, openssl."""
 import json
 import os
 import stat
@@ -66,6 +66,9 @@ class StubHarness:
               name="$3"
               shift 3
               while [ $# -gt 0 ]; do shift; done
+              if [ "${{STUB_DOPPLER_NOISY_SET:-}}" = "1" ]; then
+                echo "Doppler CLI: updated $name successfully"
+              fi
               val=$(cat)
               tmp=$(mktemp)
               jq --arg k "$name" --arg v "$val" '.[$k]=$v' "$FILE" > "$tmp"
@@ -82,14 +85,6 @@ class StubHarness:
             f"""\
             #!/usr/bin/env bash
             echo "$*" >> "{self.aws_log}"
-            if echo "$*" | grep -q "list-open-id-connect-providers"; then
-              if [ "${{STUB_OIDC_EXISTS:-0}}" = "1" ]; then
-                echo '{{"OpenIDConnectProviderList":[{{"Arn":"arn:aws:iam::123:oidc-provider/token.actions.githubusercontent.com"}}]}}'
-              else
-                echo '{{"OpenIDConnectProviderList":[]}}'
-              fi
-              exit 0
-            fi
             if echo "$*" | grep -q "create-open-id-connect-provider"; then
               exit 0
             fi
@@ -103,88 +98,31 @@ class StubHarness:
             #!/usr/bin/env bash
             echo "$PWD $*" >> "{self.tofu_log}"
             if [ -z "${{TF_VAR_local_state_encryption_passphrase:-}}" ]; then
-              if echo "$*" | grep -qE 'init|plan|output|apply'; then
-                echo "missing TF_VAR_local_state_encryption_passphrase" >&2
-                exit 1
-              fi
-            fi
-            case "${{1:-}}" in
-              init) exit 0 ;;
-              plan) touch tfplan; exit 0 ;;
-              show) exit 0 ;;
-              apply)
-                if [ ! -f tfplan ]; then exit 1; fi
-                if echo "$PWD" | grep -q bootstrap; then
-                  touch .bootstrap_applied
-                fi
-                exit 0
-                ;;
-              output)
-                shift
-                name=""
-                while [ $# -gt 0 ]; do
-                  case "$1" in
-                    -raw) shift ;;
-                    *) name="$1"; shift ;;
-                  esac
-                done
-                if [ ! -f .bootstrap_applied ] && [ ! -f ../bootstrap/.bootstrap_applied ]; then
-                  if [ ! -f .bootstrap_applied ]; then
-                    if [ -f "$(dirname "$PWD")/bootstrap/.bootstrap_applied" ] || [ -f .bootstrap_applied ]; then
-                      :
-                    else
-                      echo "bootstrap not applied" >&2
-                      exit 1
-                    fi
-                  fi
-                fi
-                if [ -f .bootstrap_applied ] || [ -f "$(pwd)" ]/infra ]; then
-                  :
-                fi
-                if [ -f .bootstrap_applied ]; then
-                  if [ "$name" = "github_tofu_plan_role_arn" ]; then echo "arn:plan"; exit 0; fi
-                  if [ "$name" = "github_tofu_apply_role_arn" ]; then echo "arn:apply"; exit 0; fi
-                fi
-                if [ -f .bootstrap_applied ]; then
-                  :
-                elif [ -f "$(dirname "$PWD")/.bootstrap_applied" ]; then
-                  :
-                fi
-                if [ -f .bootstrap_applied ]; then
-                  if [ "$name" = "github_tofu_plan_role_arn" ]; then echo "arn:plan"; exit 0; fi
-                  if [ "$name" = "github_tofu_apply_role_arn" ]; then echo "arn:apply"; exit 0; fi
-                fi
-                if [ "$name" = "github_tofu_plan_role_arn" ] && [ -f .bootstrap_applied ]; then echo "arn:plan"; exit 0; fi
-                if [ "$name" = "github_tofu_apply_role_arn" ] && [ -f .bootstrap_applied ]; then echo "arn:apply"; exit 0; fi
-                if [ "$name" = "github_tofu_plan_role_arn" ] && [ -f "$PWD/.bootstrap_applied" ]; then echo "arn:plan"; exit 0; fi
-                echo "bootstrap not applied" >&2
-                exit 1
-                ;;
-            esac
-            exit 0
-            """,
-        )
-
-        # Simpler tofu stub rewrite inline below - the above is messy. Replace with clean version.
-        write_executable(
-            self.bin_dir / "tofu",
-            f"""\
-            #!/usr/bin/env bash
-            echo "$PWD $*" >> "{self.tofu_log}"
-            if [ -z "${{TF_VAR_local_state_encryption_passphrase:-}}" ]; then
               case "${{1:-}}" in init|plan|output|apply)
                 echo "missing TF_VAR_local_state_encryption_passphrase" >&2
                 exit 1 ;;
               esac
             fi
             BOOTSTRAP_MARKER="{self.bootstrap_dir}/.bootstrap_applied"
+            IN_BOOTSTRAP=0
+            if [ "$PWD" = "{self.bootstrap_dir}" ]; then IN_BOOTSTRAP=1; fi
             case "${{1:-}}" in
               init) exit 0 ;;
-              plan) touch tfplan; exit 0 ;;
+              plan)
+                if [ "$IN_BOOTSTRAP" = "1" ]; then
+                  create="${{TF_VAR_create_github_oidc_provider:-true}}"
+                  if [ "$create" = "false" ] && [ "${{STUB_OIDC_EXISTS:-0}}" != "1" ]; then
+                    echo "GitHub OIDC provider not found (create_github_oidc_provider=false)" >&2
+                    exit 1
+                  fi
+                fi
+                touch tfplan
+                exit 0
+                ;;
               show) exit 0 ;;
               apply)
                 [ -f tfplan ] || exit 1
-                if [ "$PWD" = "{self.bootstrap_dir}" ]; then touch "$BOOTSTRAP_MARKER"; fi
+                if [ "$IN_BOOTSTRAP" = "1" ]; then touch "$BOOTSTRAP_MARKER"; fi
                 exit 0
                 ;;
               output)
@@ -243,7 +181,6 @@ class StubHarness:
             text=True,
             env=self.env(**env_extra),
             input=input_text,
-            timeout=30,
             cwd=str(self.repo_root),
         )
         return proc
@@ -276,7 +213,7 @@ class SetupStagingOpentofuStubTest(unittest.TestCase):
             )
         )
 
-    def test_bootstrap_plan_no_aws_create(self):
+    def test_bootstrap_plan_no_aws_cli_oidc(self):
         self.h.doppler_file.write_text(json.dumps({"LOCAL_STATE_ENCRYPTION_PASSPHRASE": SECRET_LOCAL}))
         proc = self.h.run(
             "--repo-root", str(self.h.repo_root), "bootstrap", "plan", STUB_OIDC_EXISTS="0"
@@ -284,19 +221,32 @@ class SetupStagingOpentofuStubTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertNotIn("create-open-id-connect-provider", self.h.aws_log.read_text())
 
-    def test_bootstrap_apply_creates_oidc_when_missing(self):
-        (self.h.bootstrap_dir / "tfplan").touch()
+    def test_bootstrap_plan_fails_when_oidc_lookup_missing(self):
         self.h.doppler_file.write_text(json.dumps({"LOCAL_STATE_ENCRYPTION_PASSPHRASE": SECRET_LOCAL}))
         proc = self.h.run(
             "--repo-root",
             str(self.h.repo_root),
-            "--yes",
             "bootstrap",
-            "apply",
+            "plan",
             STUB_OIDC_EXISTS="0",
+            TF_VAR_create_github_oidc_provider="false",
+        )
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("create_github_oidc_provider=false", proc.stderr)
+
+    def test_bootstrap_plan_on_fresh_account_default_create(self):
+        self.h.doppler_file.write_text(json.dumps({"LOCAL_STATE_ENCRYPTION_PASSPHRASE": SECRET_LOCAL}))
+        proc = self.h.run(
+            "--repo-root", str(self.h.repo_root), "bootstrap", "plan", STUB_OIDC_EXISTS="0"
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertIn("create-open-id-connect-provider", self.h.aws_log.read_text())
+        self.assertIn(str(self.h.bootstrap_dir), self.h.tofu_log.read_text())
+
+    def test_script_exports_passphrase_before_bootstrap_plan(self):
+        self.h.doppler_file.write_text(json.dumps({"LOCAL_STATE_ENCRYPTION_PASSPHRASE": SECRET_LOCAL}))
+        proc = self.h.run("--repo-root", str(self.h.repo_root), "bootstrap", "plan")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertNotIn("missing TF_VAR_local_state_encryption_passphrase", proc.stderr)
 
     def test_staging_passphrase_create_and_reuse(self):
         self.h.doppler_file.write_text(json.dumps({"LOCAL_STATE_ENCRYPTION_PASSPHRASE": SECRET_LOCAL}))
@@ -312,9 +262,17 @@ class SetupStagingOpentofuStubTest(unittest.TestCase):
                 }
             )
         )
-        proc = self.h.run("--repo-root", str(self.h.repo_root), "github-setup", "plan")
+        proc = self.h.run(
+            "--repo-root",
+            str(self.h.repo_root),
+            "github-setup",
+            "plan",
+            STUB_DOPPLER_NOISY_SET="1",
+        )
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(self.h.secrets()["TOFU_STATE_ENCRYPTION_PASSPHRASE"], GENERATED)
+        stored = self.h.secrets()["TOFU_STATE_ENCRYPTION_PASSPHRASE"]
+        self.assertEqual(stored, GENERATED)
+        self.h.assert_no_secrets_leaked(self, proc, GENERATED)
         self.h.doppler_file.write_text(
             json.dumps(
                 {
@@ -339,8 +297,8 @@ class SetupStagingOpentofuStubTest(unittest.TestCase):
         self.h.doppler_file.write_text(json.dumps({"LOCAL_STATE_ENCRYPTION_PASSPHRASE": SECRET_LOCAL}))
         proc = self.h.run("--repo-root", str(self.h.repo_root), "all", "plan")
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertIn("Bootstrap plan only", proc.stderr)
-        self.assertNotIn(f"{self.h.github_dir}/tfplan", self.h.tofu_log.read_text())
+        self.assertIn("Bootstrap plan only. Next steps in order:", proc.stderr)
+        self.assertNotIn(str(self.h.github_dir), self.h.tofu_log.read_text())
 
     def test_github_setup_without_bootstrap_fails(self):
         self.base_secrets()
@@ -367,7 +325,7 @@ class SetupStagingOpentofuStubTest(unittest.TestCase):
             "--yes",
             "all",
             "setup",
-            STUB_OIDC_EXISTS="1",
+            STUB_OIDC_EXISTS="0",
         )
         self.assertEqual(proc.returncode, 0, proc.stderr + proc.stdout)
         self.assertTrue((self.h.github_dir / "tfplan").exists())
@@ -382,10 +340,11 @@ class SetupStagingOpentofuStubTest(unittest.TestCase):
             "bootstrap",
             "apply",
             input_text="no\n",
-            STUB_OIDC_EXISTS="1",
+            STUB_OIDC_EXISTS="0",
         )
         self.assertEqual(proc.returncode, 1)
         self.assertNotIn("create-open-id-connect-provider", self.h.aws_log.read_text())
+        self.assertFalse((self.h.bootstrap_dir / ".bootstrap_applied").exists())
 
     def test_push_baseline_flag_rejected_on_bootstrap_plan(self):
         proc = self.h.run(
@@ -411,19 +370,6 @@ class SetupStagingOpentofuStubTest(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertNotIn("push", self.h.git_log.read_text())
-
-    def test_tofu_stub_fails_without_passphrase(self):
-        env = {k: v for k, v in os.environ.items() if k != "TF_VAR_local_state_encryption_passphrase"}
-        env["PATH"] = str(self.h.bin_dir)
-        proc = subprocess.run(
-            ["/bin/bash", str(self.h.bin_dir / "tofu"), "plan"],
-            capture_output=True,
-            text=True,
-            env=env,
-            cwd=str(self.h.bootstrap_dir),
-        )
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertIn("missing TF_VAR_local_state_encryption_passphrase", proc.stderr)
 
     def test_push_baseline_tag_on_all_setup(self):
         self.base_secrets()
