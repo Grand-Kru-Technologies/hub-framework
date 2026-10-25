@@ -227,7 +227,11 @@ func GetRequestFromHttp(r *http.Request) (*HTTPServiceRequest, error) {
 			Proto:            r.Proto,
 			ProtoMajor:       r.ProtoMajor,
 			ProtoMinor:       r.ProtoMinor,
+			ContentLength:    r.ContentLength,
 			TransferEncoding: r.TransferEncoding,
+			Host:             r.Host,
+			RemoteAddr:       r.RemoteAddr,
+			RequestURI:       r.RequestURI,
 		},
 	}
 
