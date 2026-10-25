@@ -17,9 +17,10 @@ import (
 )
 
 type ForwardingService struct {
-	Host       string
-	PathPrefix string
-	name       string
+	Host              string
+	PathPrefix        string
+	appendRequestPath bool
+	name              string
 	backoff    *util.Backoff
 	client     *http.Client
 	log        zerolog.Logger
@@ -38,6 +39,11 @@ func NewForwardingService(config map[string]interface{}) (entity.Task, error) {
 
 	if pathPrefix, ok := config["pathprefix"].(string); ok {
 		svc.PathPrefix = remoteforward.NormalizePathPrefix(pathPrefix)
+	}
+	if appendPath, ok := config["appendRequestPath"].(bool); ok {
+		svc.appendRequestPath = appendPath
+	} else {
+		svc.appendRequestPath = true
 	}
 
 	var backoffConfig util.BackoffConfig
@@ -115,7 +121,7 @@ func (fs *ForwardingService) forwardRequest(ctx context.Context, request entity.
 	}
 
 	requestPath := ""
-	if request.GetURL() != nil {
+	if fs.appendRequestPath && request.GetURL() != nil {
 		requestPath = request.GetURL().Path
 	}
 

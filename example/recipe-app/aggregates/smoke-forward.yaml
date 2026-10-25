@@ -19,6 +19,7 @@ spec:
           enabled: True
           config:
             pathprefix: /apply/exampleTaskPython
+            appendRequestPath: false
             clientTimeout: 15
       target:
         name: echoBody
