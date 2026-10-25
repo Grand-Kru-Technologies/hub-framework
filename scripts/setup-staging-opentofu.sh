@@ -167,7 +167,6 @@ bootstrap_state_manages_github_oidc() {
 }
 
 resolve_create_github_oidc_provider_for_plan() {
-  export_local_state_passphrase
   if [ -n "$CREATE_GITHUB_OIDC_PROVIDER_OVERRIDE" ]; then
     TF_VAR_create_github_oidc_provider="$CREATE_GITHUB_OIDC_PROVIDER_OVERRIDE"
     log "create_github_oidc_provider=${TF_VAR_create_github_oidc_provider} (command-line override)"
@@ -237,10 +236,11 @@ bootstrap_dir() { printf '%s/infra/opentofu/bootstrap' "$REPO_ROOT"; }
 github_setup_dir() { printf '%s/infra/opentofu/github-setup' "$REPO_ROOT"; }
 
 bootstrap_plan() {
-  resolve_create_github_oidc_provider_for_plan
   local dir
   dir="$(bootstrap_dir)"
+  export_local_state_passphrase
   tofu_init "$dir"
+  resolve_create_github_oidc_provider_for_plan
   tofu_plan_stack "$dir" tfplan
   log "Bootstrap plan written to ${dir}/tfplan"
 }
