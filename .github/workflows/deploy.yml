@@ -91,7 +91,11 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
       - name: Ensure baseline tag exists once
         run: |
-          if ! git rev-parse hub-framework-staging-baseline >/dev/null 2>&1; then
+          if git ls-remote --exit-code --tags origin refs/tags/hub-framework-staging-baseline >/dev/null 2>&1; then
+            echo "Baseline tag already exists on origin"
+          elif git rev-parse hub-framework-staging-baseline >/dev/null 2>&1; then
+            git push origin hub-framework-staging-baseline
+          else
             git tag -a hub-framework-staging-baseline -m "Pre remote-forward-fix baseline (main 1583326b)" 1583326b
             git push origin hub-framework-staging-baseline
           fi
