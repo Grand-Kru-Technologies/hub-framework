@@ -37,14 +37,14 @@ resource "github_actions_variable" "tofu_apply_role_arn" {
 
 resource "github_actions_environment_secret" "state_encryption_passphrase" {
   repository      = var.github_repository
-  environment     = var.plan_environment_name
+  environment     = github_repository_environment.plan.environment
   secret_name     = "TOFU_STATE_ENCRYPTION_PASSPHRASE"
   plaintext_value = var.state_encryption_passphrase
 }
 
 resource "github_actions_environment_secret" "state_encryption_passphrase_apply" {
   repository      = var.github_repository
-  environment     = var.apply_environment_name
+  environment     = github_repository_environment.apply.environment
   secret_name     = "TOFU_STATE_ENCRYPTION_PASSPHRASE"
   plaintext_value = var.state_encryption_passphrase
 }

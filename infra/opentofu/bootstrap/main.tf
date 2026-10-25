@@ -146,6 +146,15 @@ data "aws_iam_policy_document" "tofu_state_plan_s3" {
     ]
     resources = [local.state_objects_arn]
   }
+
+  statement {
+    sid = "WriteStagingStateLock"
+    actions = [
+      "s3:PutObject",
+      "s3:DeleteObject",
+    ]
+    resources = ["${aws_s3_bucket.tofu_state.arn}/${local.state_prefix}*.tflock"]
+  }
 }
 
 resource "aws_iam_role_policy" "github_tofu_plan_s3" {
