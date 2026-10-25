@@ -18,9 +18,23 @@ func CoerceInt(raw interface{}) (int, bool) {
 
 // CoercePositiveSeconds reads a client timeout in seconds from config.
 func CoercePositiveSeconds(raw interface{}) (time.Duration, bool) {
-	n, ok := CoerceInt(raw)
-	if !ok || n <= 0 {
+	switch v := raw.(type) {
+	case float64:
+		if v <= 0 {
+			return 0, false
+		}
+		return time.Duration(v * float64(time.Second)), true
+	case int:
+		if v <= 0 {
+			return 0, false
+		}
+		return time.Duration(v) * time.Second, true
+	case int64:
+		if v <= 0 {
+			return 0, false
+		}
+		return time.Duration(v) * time.Second, true
+	default:
 		return 0, false
 	}
-	return time.Duration(n) * time.Second, true
 }

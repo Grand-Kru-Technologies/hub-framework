@@ -50,24 +50,24 @@ func NewForwardingService(config map[string]interface{}) (entity.Task, error) {
 	if backoff, ok := config["backoff"].(map[string]interface{}); ok {
 		backoffConfigured = true
 		if raw, ok := backoff["initialDelay"]; ok {
-			if n, ok := remoteforward.CoerceInt(raw); ok {
+			if f, ok := raw.(float64); ok {
+				backoffConfig.InitialDelay = time.Duration(f * float64(time.Second))
+			} else if n, ok := remoteforward.CoerceInt(raw); ok {
 				backoffConfig.InitialDelay = time.Duration(n) * time.Second
-			} else if f, ok := raw.(float64); ok {
-				backoffConfig.InitialDelay = time.Duration(f) * time.Second
 			}
 		}
 		if raw, ok := backoff["maxDelay"]; ok {
-			if n, ok := remoteforward.CoerceInt(raw); ok {
+			if f, ok := raw.(float64); ok {
+				backoffConfig.MaxDelay = time.Duration(f * float64(time.Second))
+			} else if n, ok := remoteforward.CoerceInt(raw); ok {
 				backoffConfig.MaxDelay = time.Duration(n) * time.Second
-			} else if f, ok := raw.(float64); ok {
-				backoffConfig.MaxDelay = time.Duration(f) * time.Second
 			}
 		}
 		if raw, ok := backoff["multiplier"]; ok {
-			if n, ok := remoteforward.CoerceInt(raw); ok {
-				backoffConfig.Multiplier = float64(n)
-			} else if f, ok := raw.(float64); ok {
+			if f, ok := raw.(float64); ok {
 				backoffConfig.Multiplier = f
+			} else if n, ok := remoteforward.CoerceInt(raw); ok {
+				backoffConfig.Multiplier = float64(n)
 			}
 		}
 		if raw, ok := backoff["maxRetries"]; ok {
