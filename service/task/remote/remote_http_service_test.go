@@ -31,6 +31,36 @@ func testTaskConfig(host string, extra map[string]interface{}) map[string]interf
 	return cfg
 }
 
+func TestNewForwardingService_RequiresHost(t *testing.T) {
+	_, err := NewForwardingService(map[string]interface{}{
+		"backoff": map[string]interface{}{
+			"maxRetries": 3,
+		},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "host")
+}
+
+func TestNewForwardingService_AcceptsIntegerMaxRetries(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(server.Close)
+
+	task, err := NewForwardingService(map[string]interface{}{
+		"host": server.URL,
+		"backoff": map[string]interface{}{
+			"initialDelay": 0,
+			"maxDelay":     0,
+			"multiplier":   1,
+			"maxRetries":   3,
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, task)
+}
+
 func TestApply_StoresResponseBodyOnce(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
