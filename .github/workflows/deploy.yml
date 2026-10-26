@@ -72,3 +72,37 @@ jobs:
     steps:
       - run: curl -fsS --retry 30 --retry-delay 10 --retry-all-errors "$HUB_URL/health"
       - run: curl -fsS "$HUB_URL/" | grep -q "Welcome to exampleApp"
+
+  tag-release:
+    name: tag successful staging deploy
+    needs: smoke
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+      - name: Configure git identity for annotated tags
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Ensure baseline tag exists once
+        run: |
+          if git ls-remote --exit-code --tags origin refs/tags/hub-framework-staging-baseline >/dev/null 2>&1; then
+            echo "Baseline tag already exists on origin"
+          elif git rev-parse hub-framework-staging-baseline >/dev/null 2>&1; then
+            git push origin hub-framework-staging-baseline
+          else
+            git tag -a hub-framework-staging-baseline -m "Pre remote-forward-fix baseline (main 1583326b)" 1583326b
+            git push origin hub-framework-staging-baseline
+          fi
+      - name: Tag this deploy
+        run: |
+          SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
+          SHORT="$(git rev-parse --short "$SHA")"
+          TAG="hub-framework-staging-${SHORT}-$(date -u +%Y%m%dT%H%M%SZ)"
+          git tag -a "$TAG" -m "Staging deploy $TAG" "$SHA"
+          git push origin "$TAG"
