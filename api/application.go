@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/QueerGlobal/hub-framework/adapter/config/yaml"
 	"github.com/QueerGlobal/hub-framework/adapter/handler/requesthandler"
 	"github.com/QueerGlobal/hub-framework/core/entity"
 	"github.com/QueerGlobal/hub-framework/service/logging"
+	"github.com/QueerGlobal/hub-framework/service/remoteforward"
 	"github.com/QueerGlobal/hub-framework/service/target"
 	"github.com/QueerGlobal/hub-framework/service/task/builtin"
 	"github.com/QueerGlobal/hub-framework/service/task/remote"
@@ -27,6 +29,7 @@ type Application struct {
 	PublicHandler   *requesthandler.RequestHandler
 	PrivateHandler  *requesthandler.RequestHandler
 	Logger          *zerolog.Logger
+	listenHTTP      bool
 }
 
 type Option func(*Application)
@@ -67,6 +70,13 @@ func WithApplicationHome(home string) Option {
 	}
 }
 
+// WithHTTPListen controls whether Start opens its own HTTP listener on PublicPort.
+func WithHTTPListen(listen bool) Option {
+	return func(app *Application) {
+		app.listenHTTP = listen
+	}
+}
+
 func NewApplication(applicationName string, opts ...Option) *Application {
 	// Default settings
 	s := Application{
@@ -77,6 +87,7 @@ func NewApplication(applicationName string, opts ...Option) *Application {
 		CustomTaskTypes: make([]entity.TaskConstructor, 0),
 		CustomTargets:   make([]entity.TargetConstructor, 0),
 		LogLevel:        InfoLevel,
+		listenHTTP:      true,
 	}
 	// Apply functional options
 	for _, opt := range opts {
@@ -136,11 +147,13 @@ func (a *Application) startHub() error {
 	publicHandler := requesthandler.NewRequestHandler(a.PublicPort, hub)
 	//privateHandler := requesthandler.NewRequestHandler(a.PrivatePort, hub)
 
-	handlerWG := sync.WaitGroup{}
-	if err := publicHandler.Start(&handlerWG); err != nil {
-		log.Print("error initializing public handler ")
-		log.Println(err)
-		return err
+	if a.listenHTTP {
+		handlerWG := sync.WaitGroup{}
+		if err := publicHandler.Start(&handlerWG); err != nil {
+			log.Print("error initializing public handler ")
+			log.Println(err)
+			return err
+		}
 	}
 
 	/*
@@ -211,5 +224,6 @@ func (a *Application) Start() error {
 }
 
 func (a *Application) Stop() error {
+	remoteforward.FlushInitializedSentry(2 * time.Second)
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	domainerr "github.com/QueerGlobal/hub-framework/core/entity/error"
 
@@ -65,6 +66,10 @@ func (c *Configurer) readAggregateSpecs() (*map[string]*model.AggregateSpec, err
 
 	for _, file := range files {
 		if file.IsDir() {
+			continue
+		}
+
+		if strings.EqualFold(file.Name(), "smoke-forward.yaml") && os.Getenv("ENABLE_SMOKE_FORWARD") != "true" {
 			continue
 		}
 

@@ -1,3 +1,4 @@
+import base64
 import json
 from typing import Dict, Any
 
@@ -15,13 +16,25 @@ class ExampleTaskPython:
     def name(self) -> str:
         return "exampleTaskPython"
 
-    def apply(self, context: Dict[str, Any], request: Dict[str, Any]) -> None:
-        # Read the body from the ServiceRequest
-        if not request or 'body' not in request or not request['body']:
+    def _request_body(self, request: Dict[str, Any]) -> bytes:
+        if not request:
             raise ValueError("Invalid request or empty body")
+        raw = request.get('body')
+        if raw is None:
+            raw = request.get('Body')
+        if raw is None or raw == '':
+            raise ValueError("Invalid request or empty body")
+        if isinstance(raw, str):
+            return base64.b64decode(raw)
+        if isinstance(raw, (bytes, bytearray)):
+            return bytes(raw)
+        raise ValueError("Invalid request or empty body")
+
+    def apply(self, context: Dict[str, Any], request: Dict[str, Any]) -> None:
+        body = self._request_body(request)
 
         # Apply the changes using the execute method
-        result = self.execute(request['body'])
+        result = self.execute(body)
 
         # Update the request body with the result
         request['body'] = result

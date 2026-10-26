@@ -47,6 +47,27 @@ class TestRequestHandler(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("Invalid input structure", response.json['error'])
 
+    def test_apply_handler_accepts_bare_service_request(self):
+        bare_request = {
+            "ApiName": "smokeApp",
+            "ServiceName": "forward",
+            "Method": "POST",
+            "URL": "http://example.com/smokeApp/forward",
+            "InternalPath": "/smokeApp/forward",
+            "RequestMeta": {
+                "Proto": "HTTP/1.1",
+                "ProtoMajor": 1,
+                "ProtoMinor": 1,
+                "ContentLength": 0,
+                "Host": "example.com",
+                "RemoteAddr": "127.0.0.1",
+                "RequestURI": "/smokeApp/forward"
+            }
+        }
+        response = self.app.post('/apply/test_handler', json=bare_request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json, {"result": "success", "input": bare_request})
+
     def test_apply_handler_name_mismatch(self):
         test_data = {
             "Handler": "wrong_handler",

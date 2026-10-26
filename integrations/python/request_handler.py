@@ -6,6 +6,14 @@ import jsonschema
 from jsonschema import RefResolver
 import os
 
+def _normalize_handler_result(result):
+    if not isinstance(result, dict):
+        return
+    body = result.get('body')
+    if isinstance(body, (bytes, bytearray)):
+        result['body'] = body.decode('utf-8')
+
+
 def create_app(handlers):
     app = Flask(__name__)
 
@@ -23,14 +31,20 @@ def create_app(handlers):
     def health():
         return jsonify({"status": "ok", "handlers": sorted(handlers.keys())}), 200
 
-    @app.route('/apply/<handler_name>', methods=['GET', 'POST', 'PUT'])
+    @app.route('/apply/<handler_name>', methods=['GET', 'POST', 'PUT'], strict_slashes=False)
     def apply_handler(handler_name):
         # Get the JSON data from the request
         data = request.json
 
-        # Validate the input structure
-        if not isinstance(data, dict) or 'Handler' not in data or 'Request' not in data:
+        # Accept either the wrapped {Handler, Request} shape or a bare ServiceRequest
+        # (for example from hub HttpService remote forwarders).
+        if not isinstance(data, dict):
             return jsonify({"error": "Invalid input structure"}), 400
+        if 'Handler' not in data or 'Request' not in data:
+            if 'ApiName' in data and 'ServiceName' in data:
+                data = {"Handler": handler_name, "Request": data}
+            else:
+                return jsonify({"error": "Invalid input structure"}), 400
 
         # Validate the handler name
         if data['Handler'] != handler_name:
@@ -57,6 +71,7 @@ def create_app(handlers):
         # Call the handler
         try:
             result = handlers[handler_name](data['Request'])
+            _normalize_handler_result(result)
             return jsonify(result), 200
         except Exception as e:
             app.logger.error(f"Handler execution error: {str(e)}")
