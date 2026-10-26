@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/QueerGlobal/hub-framework/api"
+	"github.com/QueerGlobal/hub-framework/core/entity"
 	"github.com/QueerGlobal/hub-framework/example/recipe-app/golang/tasks"
 )
 
@@ -27,7 +28,7 @@ func (h rootHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "ok")
 		return
 	}
-	if strings.HasPrefix(strings.ToLower(r.URL.Path), "/smokeapp/") && os.Getenv("ENABLE_SMOKE_FORWARD") != "true" {
+	if smokeForwardDisabled() && requestTargetsSmokeForward(r) {
 		http.NotFound(w, r)
 		return
 	}
@@ -36,6 +37,18 @@ func (h rootHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.NotFound(w, r)
+}
+
+func smokeForwardDisabled() bool {
+	return os.Getenv("ENABLE_SMOKE_FORWARD") != "true"
+}
+
+func requestTargetsSmokeForward(r *http.Request) bool {
+	svcReq, err := entity.GetRequestFromHttp(r)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(svcReq.ApiName, "smokeApp") && strings.EqualFold(svcReq.ServiceName, "forward")
 }
 
 func main() {

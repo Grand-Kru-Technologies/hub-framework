@@ -141,6 +141,42 @@ func TestReadHubSpec(t *testing.T) {
 	assert.Equal(t, "TestApp", spec.Spec.ApplicationName)
 }
 
+func TestReadAggregateSpecs_SkipsSmokeForwardWithoutEnv(t *testing.T) {
+	testDir := setupTestDirectory(t)
+	defer os.RemoveAll(testDir)
+
+	smokeYAML := `
+spec:
+  name: forward
+  apiName: smokeApp
+  isPublic: true
+  schemaName: TestSchema
+  schemaVersion: v0.0.1
+  handlers:
+    - methods: ["POST"]
+      inbound: []
+      outbound: []
+      target:
+        name: noop
+        type: MockTarget
+`
+	err := os.WriteFile(filepath.Join(testDir, "aggregates", "smoke-forward.yaml"), []byte(smokeYAML), 0644)
+	require.NoError(t, err)
+
+	c := NewConfigurer(testDir)
+	t.Setenv("ENABLE_SMOKE_FORWARD", "")
+	specs, err := c.readAggregateSpecs()
+	require.NoError(t, err)
+	assert.Len(t, *specs, 1)
+	assert.NotContains(t, *specs, "smoke-forward.yaml")
+
+	t.Setenv("ENABLE_SMOKE_FORWARD", "true")
+	specs, err = c.readAggregateSpecs()
+	require.NoError(t, err)
+	assert.Len(t, *specs, 2)
+	assert.Contains(t, *specs, "smoke-forward.yaml")
+}
+
 func TestReadAggregateSpecs(t *testing.T) {
 	// register mock tasks and targets
 	registerMockTasks()
